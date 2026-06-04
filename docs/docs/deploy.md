@@ -422,6 +422,12 @@ the `terraform` connector registers on boot:
 ASGARD_TF_MODULES_DIR=/modules                       # bundled in the official image
 ASGARD_TF_WORK_DIR=/data/asgard-tf                   # scratch only; can be ephemeral
 # ASGARD_TF_ALLOWED=aws:1234567890                   # OPTIONAL multi-account guardrail
+
+# AWS provisioning context (region + account are AWS-wide; subnet/SG are RDS-only):
+AWS_DEFAULT_REGION=us-west-2                          # standard provider env, all AWS modules
+ASGARD_AWS_DEFAULT_ACCOUNT=123456789012              # default target + attribution account
+ASGARD_RDS_SUBNET_GROUP=my-db-subnets                # RDS placement; omit → default VPC
+ASGARD_RDS_SECURITY_GROUP_IDS=sg-123,sg-456          # RDS security groups (csv)
 ```
 
 `ASGARD_TF_MODULES_DIR` is the switch that arms real provisioning — set it and the
@@ -554,6 +560,10 @@ plaintext, or the audit log.
 | `ASGARD_SERVICES_DIR` | Operator overlay dir of your own `service.yaml` files (added/overridden by `id` on top of the embedded catalog). Lets a deployed image add services without a recompile or an `asgard.yaml`; arms the overlay even without Terraform. See *Bring your own services*. | (off) |
 | `ASGARD_TF_WORK_DIR` | Scratch dir for Terraform working dirs. **State itself is kept (encrypted) in the DB**, so this may be ephemeral. | system temp |
 | `ASGARD_TF_ALLOWED` | **Optional** `cloud:account` allowlist (e.g. `aws:1234567890,auth0:your-tenant`) — a multi-account *hardening* guardrail, not a per-resource list. The real boundary on a single-account deploy is the IAM role Asgard runs under; leave this unset and it provisions into the ambient account. Set it to constrain which cloud accounts Asgard may target when it can assume into several. First entry is the default target. | — |
+| `AWS_DEFAULT_REGION` / `AWS_REGION` | **Standard AWS env**, read by the Terraform AWS provider for *every* AWS module — the one place to set the region all AWS resources deploy into. Asgard adds no region var of its own; a request may still override per-resource via `spec.region`. | (provider default) |
+| `ASGARD_AWS_DEFAULT_ACCOUNT` | AWS-wide default account id for attribution + the request gate's default target. Set it and provisioning into that account works without `ASGARD_TF_ALLOWED` (it's added to the allowlist and made the default target). The account Terraform actually deploys into is still whatever Asgard's IAM creds resolve to. | — |
+| `ASGARD_RDS_SUBNET_GROUP` | RDS-only: the DB subnet group `rds-postgres` deploys into (operator network placement, so agents don't supply it). Unset → the module falls back to the default VPC. | — |
+| `ASGARD_RDS_SECURITY_GROUP_IDS` | RDS-only: comma-separated security group ids for `rds-postgres`. Unset → default VPC security group. | — |
 | `ASGARD_AUTO_APPROVE_CEILINGS` | Per-classification monthly self-service ceilings, `classification=usd` comma list, e.g. `poc=500,light-operational=2500,wide-operational=10000,critical-path=25000`. A request whose project-total infra stays under its tier's ceiling auto-approves; above it routes to human review. Merged per-tier onto the defaults. | poc=500, light-op=2500, wide-op=10000, critical-path=25000 |
 | `ASGARD_GIT_TOKEN` | Token for catalog source repos (GitHub/GitLab), if configured. | — |
 | `ASGARD_GUARDRAIL_MODE` | `enforce` (default) or `monitor`. | `enforce` |

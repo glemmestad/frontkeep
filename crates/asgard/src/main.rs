@@ -1089,6 +1089,7 @@ fn provisioning_from_env() -> Option<ProvisioningCfg> {
         services_dir,
         std::env::var("ASGARD_TF_WORK_DIR").ok(),
         std::env::var("ASGARD_TF_ALLOWED").ok(),
+        std::env::var("ASGARD_AWS_DEFAULT_ACCOUNT").ok(),
     ))
 }
 
@@ -1097,8 +1098,9 @@ fn provisioning_cfg_from_parts(
     services_dir: Option<String>,
     work_dir: Option<String>,
     allowed_csv: Option<String>,
+    aws_default_account: Option<String>,
 ) -> ProvisioningCfg {
-    let allowed: Vec<TargetCfg> = allowed_csv
+    let mut allowed: Vec<TargetCfg> = allowed_csv
         .map(|s| {
             s.split(',')
                 .filter_map(|t| t.split_once(':'))
@@ -1109,6 +1111,26 @@ fn provisioning_cfg_from_parts(
                 .collect()
         })
         .unwrap_or_default();
+    // `ASGARD_AWS_DEFAULT_ACCOUNT` sets the AWS-wide default target. Since a deploy
+    // provisions into that account, make sure it's an allowed target (prepend it,
+    // so it's also the default below) — otherwise the request gate would refuse it.
+    if let Some(acct) = aws_default_account
+        .map(|a| a.trim().to_string())
+        .filter(|a| !a.is_empty())
+    {
+        if !allowed
+            .iter()
+            .any(|t| t.cloud == "aws" && t.account == acct)
+        {
+            allowed.insert(
+                0,
+                TargetCfg {
+                    cloud: "aws".to_string(),
+                    account: acct,
+                },
+            );
+        }
+    }
     // Default the request target to the first allowed entry, so a single-cloud
     // env-armed deploy provisions without every request having to name the
     // cloud/account — otherwise requests fall back to the stub target and are
@@ -1636,6 +1658,7 @@ mod tests {
             None,
             Some("/data/tf".into()),
             Some("auth0:psiq-tenant".into()),
+            None,
         );
         // The default target matches the allowlist, so a request that doesn't name
         // a cloud/account still resolves to an allowed target (not the stub).
@@ -1647,7 +1670,7 @@ mod tests {
 
     #[test]
     fn env_arming_without_allowlist_sets_no_default_target() {
-        let cfg = provisioning_cfg_from_parts(Some("/modules".into()), None, None, None);
+        let cfg = provisioning_cfg_from_parts(Some("/modules".into()), None, None, None, None);
         assert!(cfg.default_cloud.is_none());
         assert!(cfg.default_account.is_none());
         assert!(cfg.allowed.is_empty());
@@ -1657,11 +1680,45 @@ mod tests {
     fn services_overlay_arms_without_terraform() {
         // A customer adds their own service definitions by pointing
         // ASGARD_SERVICES_DIR at an overlay dir — no terraform modules required.
-        let cfg = provisioning_cfg_from_parts(None, Some("/srv/overlay".into()), None, None);
+        let cfg = provisioning_cfg_from_parts(None, Some("/srv/overlay".into()), None, None, None);
         assert_eq!(cfg.services_dir, Some(PathBuf::from("/srv/overlay")));
         assert!(
             cfg.terraform.is_none(),
             "no modules dir → terraform connector stays unarmed"
         );
+    }
+
+    #[test]
+    fn aws_default_account_sets_target_and_arms_its_allowlist() {
+        // ASGARD_AWS_DEFAULT_ACCOUNT alone makes (aws, <id>) the default target and
+        // an allowed one, so a request provisions into it without naming it.
+        let cfg = provisioning_cfg_from_parts(
+            Some("/modules".into()),
+            None,
+            None,
+            None,
+            Some("123456789012".into()),
+        );
+        assert_eq!(cfg.default_cloud.as_deref(), Some("aws"));
+        assert_eq!(cfg.default_account.as_deref(), Some("123456789012"));
+        assert!(cfg
+            .allowed
+            .iter()
+            .any(|t| t.cloud == "aws" && t.account == "123456789012"));
+    }
+
+    #[test]
+    fn aws_default_account_prepends_to_an_existing_allowlist() {
+        // It augments rather than replaces an explicit allowlist, and becomes the
+        // default target (first entry).
+        let cfg = provisioning_cfg_from_parts(
+            Some("/modules".into()),
+            None,
+            None,
+            Some("auth0:tenant".into()),
+            Some("123456789012".into()),
+        );
+        assert_eq!(cfg.default_account.as_deref(), Some("123456789012"));
+        assert_eq!(cfg.allowed.len(), 2);
     }
 }
