@@ -1,0 +1,20 @@
+id: exec-echo
+name: Exec Echo (script)
+category: tooling
+status: live
+classification_min: poc
+classification_max: wide-operational
+description: Example of the exec connector, the escape hatch for non-IaC and SaaS services. Runs a configured command, JSON stdout becomes outputs.
+auto_approvable: true
+required_fields: [name]
+provisioner:
+  connector: exec
+  config:
+    command: ["sh", "-c", "cat >/dev/null; echo '{\"provisioned\": true, \"by\": \"exec-echo\"}'"]
+cost:
+  model: flat
+  estimated_monthly_usd: 1.0
+  source:
+    type: flat
+tags: [tooling, exec, example]
+documentation: services/exec-echo/README.md

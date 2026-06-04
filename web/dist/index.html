@@ -1,0 +1,1804 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Asgard</title>
+  <style>
+    :root {
+      --bg:#08090b; --bg2:#0b0d10; --panel:#0e1014; --panel2:#121519;
+      --line:#1a1e25; --line2:#252b34; --fg:#e8ebf1; --muted:#727885; --muted2:#525861;
+      --teal:#2dd4bf; --teal2:#5eead4; --purple:#a78bfa; --blue:#60a5fa;
+      --green:#34d399; --amber:#fbbf24; --red:#f87171;
+      /* semantic surfaces (overridden in light mode) */
+      --chip:#161a21; --hover:#12161d; --code:#0b0e13; --codefg:#cdd6e3; --input:#0a0c10; --track:#171b22;
+      --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+    }
+    [data-theme=light] {
+      --bg:#f7f8fa; --bg2:#eef1f5; --panel:#ffffff; --panel2:#f3f5f8;
+      --line:#e4e8ee; --line2:#d3d9e2; --fg:#1a1f27; --muted:#5b6370; --muted2:#888f9b;
+      --teal:#0d9488; --teal2:#0f766e; --purple:#7c3aed; --blue:#2563eb;
+      --green:#059669; --amber:#b45309; --red:#dc2626;
+      --chip:#eef1f5; --hover:#f0f3f7; --code:#f3f5f9; --codefg:#1a1f27; --input:#ffffff; --track:#e4e8ee;
+    }
+    [data-theme=light] .banner { background:#fdecec; border-color:#f3c7c7; }
+    [data-theme=light] button.danger { background:#fdecec; border-color:#f3c7c7; }
+    [data-theme=light] .pill.green { border-color:#a7f3d0; background:#ecfdf5; }
+    [data-theme=light] .pill.red { border-color:#fecaca; background:#fef2f2; }
+    [data-theme=light] .pill.teal { border-color:#99f6e4; background:#f0fdfa; }
+    [data-theme=light] .pill.purple { border-color:#ddd6fe; background:#f5f3ff; }
+    [data-theme=light] .pill.blue { border-color:#bfdbfe; background:#eff6ff; }
+    [data-theme=light] .pill.amber { border-color:#fde68a; background:#fffbeb; }
+    [data-theme=light] .chip.green { background:#ecfdf5; }
+    [data-theme=light] .chip.red { background:#fef2f2; }
+    /* confirmation modal */
+    .modal-ov { position:fixed; inset:0; background:rgba(0,0,0,.5); display:flex; align-items:center;
+      justify-content:center; z-index:100; }
+    .modal { background:var(--panel); border:1px solid var(--line2); border-radius:12px; padding:20px 22px;
+      max-width:430px; width:90%; box-shadow:0 16px 50px rgba(0,0,0,.35); }
+    .modal h3 { margin:0 0 8px; font-size:15px; }
+    .themebtn { background:transparent; border:0; color:var(--muted); cursor:pointer; font:inherit; font-size:14px;
+      padding:2px 6px; border-radius:6px; }
+    .themebtn:hover { color:var(--fg); background:var(--hover); }
+    * { box-sizing:border-box; }
+    html,body { height:100%; }
+    body { margin:0; background:var(--bg); color:var(--fg);
+      font:14px/1.5 -apple-system,system-ui,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+      -webkit-font-smoothing:antialiased; }
+    .num { font-variant-numeric:tabular-nums; }
+    .muted { color:var(--muted); } .err { color:var(--red); } .ok { color:var(--green); }
+    code { font-family:var(--mono); font-size:12px; color:var(--teal2); background:transparent; }
+
+    /* shell: slim left sidebar + content */
+    .shell { display:flex; min-height:100vh; }
+    .logo { width:28px; height:28px; border-radius:8px; display:grid; place-items:center;
+      background:linear-gradient(150deg,var(--teal),#0f9b8e); color:#04201d; font-weight:800; font-size:16px; }
+    .brand { font-weight:700; letter-spacing:.2px; font-size:15px; }
+
+    aside { width:212px; flex:none; border-right:1px solid var(--line); background:var(--bg2);
+      display:flex; flex-direction:column; position:sticky; top:0; height:100vh; }
+    .sidehead { display:flex; align-items:center; gap:10px; padding:16px 16px 14px; }
+    nav { display:flex; flex-direction:column; gap:2px; padding:8px 10px; }
+    nav button { display:flex; align-items:center; gap:10px; text-align:left; background:transparent; border:0;
+      color:var(--muted); padding:8px 11px; border-radius:8px; cursor:pointer; font-size:13px; font-family:inherit; }
+    nav button:hover { color:var(--fg); background:var(--hover); }
+    nav button.active { color:var(--fg); background:var(--chip); }
+    nav button .ic { width:16px; text-align:center; opacity:.85; }
+    .sidefoot { margin-top:auto; padding:12px 16px; border-top:1px solid var(--line);
+      display:flex; align-items:center; gap:9px; color:var(--muted); font-size:12px; }
+    .dot { width:7px; height:7px; border-radius:50%; background:var(--green); box-shadow:0 0 8px var(--green); }
+    .avatar { width:26px; height:26px; border-radius:50%; background:var(--chip); display:grid; place-items:center;
+      color:var(--muted); font-size:12px; border:1px solid var(--line2); margin-left:auto; }
+
+    .content { flex:1; min-width:0; }
+    main.wrap { max-width:1100px; margin:0 auto; padding:26px 24px; }
+    main.full { padding:0; }
+    .pagehead { margin:0 0 4px; font-size:20px; font-weight:700; letter-spacing:-.3px; }
+    .pagesub { margin:0 0 20px; color:var(--muted); font-size:13px; }
+
+    /* shared data states */
+    .state { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px;
+      padding:48px 20px; color:var(--muted); text-align:center; }
+    .spinner { width:22px; height:22px; border-radius:50%; border:2.5px solid var(--line2);
+      border-top-color:var(--teal); animation:spin .7s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    .banner { display:flex; align-items:center; gap:9px; padding:11px 14px; border-radius:9px; margin-bottom:14px;
+      background:#1d1011; border:1px solid #50272b; color:var(--red); font-size:13px; }
+
+    /* shared bits */
+    .lbl { font-size:10.5px; letter-spacing:.13em; text-transform:uppercase; color:var(--muted); }
+    .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; }
+    .big { font-size:30px; font-weight:700; letter-spacing:-.5px; }
+    .seg { display:inline-flex; background:var(--chip); border:1px solid var(--line2); border-radius:9px; padding:2px; }
+    .seg button { background:transparent; border:0; color:var(--muted); padding:5px 11px; border-radius:7px;
+      cursor:pointer; font-size:12px; font-family:inherit; font-weight:600; }
+    .seg button.on { background:var(--line2); color:var(--fg); }
+    .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    input, select { background:var(--input); border:1px solid var(--line2); color:var(--fg);
+      padding:8px 10px; border-radius:8px; font-family:inherit; font-size:13px; }
+    button.act { background:var(--teal); border:0; color:#04201d; padding:8px 13px; border-radius:8px;
+      cursor:pointer; font-weight:700; font-family:inherit; }
+    button.danger { background:#2a1416; color:var(--red); border:1px solid #50272b; padding:5px 10px;
+      border-radius:7px; cursor:pointer; font-size:12px; }
+    .tablewrap { background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+    table { width:100%; border-collapse:collapse; }
+    th,td { text-align:left; padding:11px 14px; border-bottom:1px solid var(--line); vertical-align:middle; }
+    thead th { background:var(--bg2); }
+    tbody tr:last-child td { border-bottom:0; }
+    tbody tr { transition:background .08s; }
+    tbody tr:hover { background:var(--hover); }
+    th { color:var(--muted); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.06em; }
+    td.r, th.r { text-align:right; }
+    .pill { display:inline-block; font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid var(--line2);
+      color:var(--muted); white-space:nowrap; }
+    .pill.green { color:var(--green); border-color:#1f4435; background:#0d1f18; }
+    .pill.red { color:var(--red); border-color:#50272b; background:#1d1011; }
+    .pill.teal { color:var(--teal2); border-color:#1c4a44; background:#0a1f1c; }
+    .pill.purple { color:var(--purple); border-color:#3a2f5c; background:#15102a; }
+    .pill.blue { color:var(--blue); border-color:#26456e; background:#0d1a2c; }
+    .pill.amber { color:var(--amber); border-color:#5c4a1c; background:#221a08; }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
+    .card h3 { margin:0 0 12px; font-size:14px; }
+    .snip { position:relative; background:var(--code); border:1px solid var(--line); border-radius:8px;
+      padding:11px 13px; margin:8px 0 0; font-family:var(--mono); font-size:12px; line-height:1.55;
+      color:var(--codefg); white-space:pre-wrap; word-break:break-all; }
+    .snip .cp { position:absolute; top:7px; right:7px; background:var(--chip); border:1px solid var(--line);
+      color:var(--muted); border-radius:6px; padding:2px 8px; font:inherit; font-size:11px; cursor:pointer; }
+    .snip .cp:hover { color:var(--fg); }
+    .step { display:flex; gap:13px; }
+    .step .n { flex:none; width:26px; height:26px; border-radius:50%; background:var(--chip); border:1px solid var(--line);
+      color:var(--teal); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:13px; }
+    .step .b { flex:1; min-width:0; }
+    .step h3 { margin:2px 0 6px; }
+    .catic { flex:none; width:30px; height:30px; border-radius:8px; background:var(--chip); border:1px solid var(--line);
+      display:flex; align-items:center; justify-content:center; font-size:15px; color:var(--teal); }
+    .lcard { cursor:pointer; transition:border-color .12s, background .12s; }
+    .lcard:hover { border-color:var(--teal); background:var(--hover); }
+    .lcard .ttl { font-weight:600; }
+    .crumb { background:transparent; border:0; color:var(--teal); cursor:pointer; font:inherit; padding:0; margin-bottom:12px; }
+    .crumb:hover { text-decoration:underline; }
+    .md { font-size:13.5px; line-height:1.6; color:var(--fg); }
+    .md h4 { font-size:15px; margin:18px 0 6px; }
+    .md h5 { font-size:13px; margin:14px 0 5px; color:var(--muted); text-transform:uppercase; letter-spacing:.4px; }
+    .md p { margin:8px 0; }
+    .md ul, .md ol { margin:8px 0; padding-left:20px; }
+    .md li { margin:3px 0; }
+    .md code { font-family:var(--mono); font-size:12px; background:var(--chip); padding:1px 5px; border-radius:4px; }
+    .md pre { background:var(--code); border:1px solid var(--line); border-radius:8px; padding:11px 13px; overflow:auto; }
+    .md pre code { background:none; padding:0; }
+    .md a { color:var(--teal); }
+    .md table { border-collapse:collapse; margin:10px 0; font-size:12.5px; }
+    .md th, .md td { border:1px solid var(--line); padding:5px 9px; text-align:left; }
+    .grid2 { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:14px; }
+    .pcard { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:15px; }
+    .pcard .ph { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+    .pcard .pn { font-weight:600; font-size:14px; }
+    .pcard .pid { font-family:var(--mono); font-size:11px; color:var(--muted); margin-top:2px; }
+    .pcard .meta { display:flex; flex-wrap:wrap; gap:6px; margin:11px 0; }
+    .pcard .foot { display:flex; align-items:center; justify-content:space-between; gap:10px;
+      margin-top:11px; padding-top:11px; border-top:1px solid var(--line); }
+    .pactions { display:flex; gap:6px; }
+
+    /* dashboard */
+    .dtoolbar { display:flex; align-items:center; gap:10px; padding:12px 18px; border-bottom:1px solid var(--line); }
+    .kpis { display:grid; grid-template-columns:repeat(4,1fr); border-bottom:1px solid var(--line); }
+    .kpi { padding:16px 20px; border-right:1px solid var(--line); display:flex; flex-direction:column; gap:6px; }
+    .kpi:last-child { border-right:0; }
+    .kpi .top { display:flex; align-items:center; gap:10px; }
+    .chip { font-size:11px; font-weight:700; padding:2px 7px; border-radius:6px; }
+    .chip.green { color:var(--green); background:#0e2019; }
+    .chip.red { color:var(--red); background:#1f1011; }
+    .sub { font-size:11.5px; color:var(--muted); }
+
+    .body3 { display:grid; grid-template-columns:340px 1fr 372px; min-height:calc(100vh - 49px - 92px); }
+    .colL { border-right:1px solid var(--line); }
+    .colR { border-left:1px solid var(--line); display:flex; flex-direction:column; }
+    .sect { padding:16px 18px; border-bottom:1px solid var(--line); }
+    .sect .lbl + .lbl { margin-top:2px; }
+
+    .donutwrap { display:flex; align-items:center; gap:16px; margin-top:14px; }
+    .link { color:var(--teal2); cursor:pointer; }
+
+    .mover { display:grid; grid-template-columns:4px 1fr 64px 70px; gap:10px; align-items:center; padding:9px 0; }
+    .mover .bar { width:4px; height:30px; border-radius:3px; }
+    .mover .nm { font-size:13px; } .mover .id { font-size:11px; color:var(--muted); font-family:var(--mono); }
+    .mover .pct { text-align:right; font-weight:700; font-size:13px; }
+    .mover .delta { text-align:right; font-size:11px; color:var(--muted); }
+
+    .pr { margin:13px 0; }
+    .pr .h { display:flex; justify-content:space-between; font-size:13px; margin-bottom:5px; }
+    .pr .track { height:6px; border-radius:4px; background:var(--track); overflow:hidden; }
+    .pr .fill { height:100%; background:var(--teal); border-radius:4px; }
+    .pr .fill.hot { background:var(--red); }
+    .pr .cap { font-size:11px; color:var(--muted); margin-top:4px; }
+
+    .center { position:relative; }
+    .tmcell { position:absolute; border:1px solid var(--bg); border-radius:6px; padding:8px 9px; overflow:hidden;
+      display:flex; flex-direction:column; justify-content:flex-end; cursor:default; }
+    .tmcell .tnm { font-size:12px; font-weight:600; line-height:1.2; }
+    .tmcell .tval { font-size:11px; opacity:.8; }
+    .centerlabel { position:absolute; top:14px; left:18px; }
+
+    /* chat */
+    .chat { display:flex; flex-direction:column; height:100%; }
+    .chatlog { flex:1; overflow:auto; padding:16px 18px; display:flex; flex-direction:column; gap:12px; }
+    .chip-q { text-align:left; background:var(--code); border:1px solid var(--line2); color:var(--fg);
+      padding:9px 11px; border-radius:9px; cursor:pointer; font-size:12.5px; font-family:inherit; }
+    .chip-q:hover { border-color:var(--teal); }
+    .msg { padding:10px 12px; border-radius:10px; font-size:13px; max-width:92%; }
+    .msg.user { align-self:flex-end; background:var(--chip); }
+    .msg.bot { align-self:flex-start; background:var(--code); border:1px solid var(--line); white-space:pre-wrap; }
+    .chatbar { display:flex; gap:8px; padding:12px 14px; border-top:1px solid var(--line); }
+    .chatbar input { flex:1; }
+    .skel { color:var(--muted); padding:24px; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside id="aside">
+      <div class="sidehead"><span class="logo">A</span><span class="brand">Asgard</span></div>
+      <nav id="nav"></nav>
+      <div class="sidefoot"><span class="dot"></span><span>live</span>
+        <button class="themebtn" id="themebtn" title="Toggle light/dark">☾</button>
+        <span class="avatar" id="avatar">U</span></div>
+    </aside>
+    <div class="content">
+      <main id="view" class="full"></main>
+    </div>
+  </div>
+
+  <script>
+    const api = (p, opts) => fetch(p, opts).then(async r => {
+      const t = await r.text();
+      let b; try { b = t ? JSON.parse(t) : null; } catch { b = t; }
+      if (!r.ok) throw new Error((b && b.error) || r.statusText);
+      return b;
+    });
+    const el = (h) => { const d = document.createElement('div'); d.innerHTML = h; return d.firstElementChild; };
+    const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    // Theme (dark default, user-switchable, persisted).
+    const applyTheme = (t) => { document.documentElement.setAttribute('data-theme', t); try { localStorage.setItem('asgard-theme', t); } catch {} };
+    const theme = () => document.documentElement.getAttribute('data-theme') || 'dark';
+    function toggleTheme() { applyTheme(theme() === 'light' ? 'dark' : 'light'); const b = document.getElementById('themebtn'); if (b) b.textContent = theme() === 'light' ? '☀' : '☾'; }
+    // A confirmation gate for destructive actions. Resolves true only if confirmed.
+    function confirmAction({ title, message, confirmLabel = 'Confirm' }) {
+      return new Promise(resolve => {
+        const ov = el(`<div class="modal-ov"><div class="modal">
+          <h3>${esc(title)}</h3>
+          <p class="muted" style="font-size:13px;margin:0 0 18px;line-height:1.5">${esc(message)}</p>
+          <div class="row" style="justify-content:flex-end">
+            <button class="act" id="m-cancel" style="background:var(--chip);color:var(--fg);border:1px solid var(--line2)">Cancel</button>
+            <button class="act" id="m-ok" style="background:var(--red);color:#fff">${esc(confirmLabel)}</button>
+          </div></div></div>`);
+        document.body.appendChild(ov);
+        const done = (v) => { ov.remove(); resolve(v); };
+        ov.querySelector('#m-cancel').onclick = () => done(false);
+        ov.querySelector('#m-ok').onclick = () => done(true);
+        ov.onclick = (e) => { if (e.target === ov) done(false); };
+        document.addEventListener('keydown', function esc2(e) { if (e.key === 'Escape') { done(false); document.removeEventListener('keydown', esc2); } });
+      });
+    }
+    // Minimal, dependency-free markdown → HTML. Escapes first, then applies a safe
+    // subset (headings, lists, tables, fences, inline code/bold/italic/links).
+    function mdToHtml(src) {
+      const inline = (s) => esc(s)
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>')
+        .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+      const lines = String(src || '').split('\n');
+      let html = '', i = 0, ul = false, ol = false, code = false, buf = '', para = [];
+      // Consecutive non-blank text lines are ONE paragraph (joined with spaces),
+      // the way Markdown actually works — not one <p> per wrapped line.
+      const flushP = () => { if (para.length) { html += '<p>' + inline(para.join(' ')) + '</p>'; para = []; } };
+      const closeL = () => { flushP(); if (ul) { html += '</ul>'; ul = false; } if (ol) { html += '</ol>'; ol = false; } };
+      const tableAt = (n) => /\|/.test(lines[n] || '') && /^\s*\|?[\s:|-]+\|?\s*$/.test(lines[n + 1] || '');
+      while (i < lines.length) {
+        let ln = lines[i];
+        if (/^\s*```/.test(ln)) { closeL(); if (code) { html += '<pre><code>' + esc(buf) + '</code></pre>'; code = false; buf = ''; } else { code = true; } i++; continue; }
+        if (code) { buf += (buf ? '\n' : '') + ln; i++; continue; }
+        if (tableAt(i)) {
+          closeL();
+          const cells = (r) => r.replace(/^\s*\|?|\|?\s*$/g, '').split('|').map(c => c.trim());
+          let head = cells(ln); i += 2; let rows = '';
+          while (i < lines.length && /\|/.test(lines[i])) { rows += '<tr>' + cells(lines[i]).map(c => `<td>${inline(c)}</td>`).join('') + '</tr>'; i++; }
+          html += '<table><thead><tr>' + head.map(c => `<th>${inline(c)}</th>`).join('') + '</tr></thead><tbody>' + rows + '</tbody></table>';
+          continue;
+        }
+        let m;
+        if ((m = ln.match(/^(#{1,6})\s+(.*)/))) { closeL(); const lvl = Math.min(5, m[1].length + 3); html += `<h${lvl}>${inline(m[2])}</h${lvl}>`; i++; continue; }
+        if (/^\s*[-*]\s+/.test(ln)) { flushP(); if (!ul) { closeL(); html += '<ul>'; ul = true; } html += '<li>' + inline(ln.replace(/^\s*[-*]\s+/, '')) + '</li>'; i++; continue; }
+        if (/^\s*\d+\.\s+/.test(ln)) { flushP(); if (!ol) { closeL(); html += '<ol>'; ol = true; } html += '<li>' + inline(ln.replace(/^\s*\d+\.\s+/, '')) + '</li>'; i++; continue; }
+        if (/^\s*$/.test(ln)) { closeL(); i++; continue; }
+        para.push(ln); i++;
+      }
+      if (code) html += '<pre><code>' + esc(buf) + '</code></pre>';
+      closeL();
+      return html;
+    }
+    // ---------- Knowledge version history + line diff (shared by guidance/recipes/standards) ----------
+    // LCS-based line diff → rows of [op, line] where op is ' ' | '-' | '+'.
+    function lineDiff(oldText, newText) {
+      const a = String(oldText || '').split('\n'), b = String(newText || '').split('\n');
+      const n = a.length, m = b.length;
+      const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+      for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--)
+        dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+      const out = []; let i = 0, j = 0;
+      while (i < n && j < m) {
+        if (a[i] === b[j]) { out.push([' ', a[i]]); i++; j++; }
+        else if (dp[i + 1][j] >= dp[i][j + 1]) { out.push(['-', a[i]]); i++; }
+        else { out.push(['+', b[j]]); j++; }
+      }
+      while (i < n) { out.push(['-', a[i]]); i++; }
+      while (j < m) { out.push(['+', b[j]]); j++; }
+      return out;
+    }
+    function renderVersions(versions, currentBody) {
+      if (!versions.length) return empty('No version history yet.');
+      return versions.map(v => {
+        const snapBody = (v.snapshot && v.snapshot.body) || '';
+        const diff = lineDiff(snapBody, currentBody);
+        const changed = diff.some(r => r[0] !== ' ');
+        const diffHtml = changed
+          ? `<details style="margin-top:6px"><summary class="muted" style="cursor:pointer;font-size:11px">diff vs current</summary>
+             <pre class="snip" style="white-space:pre-wrap;margin-top:6px">${diff.map(([op, ln]) => {
+               const c = op === '+' ? '#34d399' : op === '-' ? '#f87171' : 'var(--muted)';
+               const pre = op === '+' ? '+ ' : op === '-' ? '- ' : '  ';
+               return `<span style="color:${c};display:block">${esc(pre + ln)}</span>`;
+             }).join('')}</pre></details>`
+          : `<span class="muted" style="font-size:11px">— matches current</span>`;
+        return `<div class="card" style="margin:6px 0;padding:8px 10px">
+            <div class="row" style="justify-content:space-between">
+              <span>v${v.version} ${pill(v.action, v.action === 'approved' ? 'green' : 'blue')}</span>
+              <span class="muted" style="font-size:11px">${esc(v.author || '—')} · ${esc((v.changed_at || '').slice(0, 16).replace('T', ' '))}</span>
+            </div>${diffHtml}</div>`;
+      }).join('');
+    }
+    const historyBox = () => `<details class="histbox card" style="margin-top:18px"><summary style="cursor:pointer;color:var(--muted)">🕰 Version history</summary><div class="histbody" style="margin-top:8px">${loading('Loading history…')}</div></details>`;
+    function wireHistory(scope, docType, id, currentBody) {
+      const box = scope.querySelector('.histbox');
+      if (!box) return;
+      let loaded = false;
+      box.addEventListener('toggle', async () => {
+        if (!box.open || loaded) return;
+        loaded = true;
+        const tgt = box.querySelector('.histbody');
+        try { tgt.innerHTML = renderVersions(await api(`/api/${docType}/${encodeURIComponent(id)}/history`), currentBody); }
+        catch (e) { tgt.innerHTML = errBanner(e); loaded = false; }
+      });
+    }
+    const PAL = ['#2dd4bf','#a78bfa','#60a5fa','#34d399','#fbbf24','#f472b6','#22d3ee','#fb923c'];
+    function money(n){ n=Number(n||0); const a=Math.abs(n);
+      if(n===0) return '$0';
+      if(a>=1000) return '$'+(n/1000).toFixed(1)+'k';
+      if(a>=100) return '$'+n.toFixed(0);
+      return '$'+n.toFixed(2); }
+
+    const usd4 = (n) => '$' + Number(n||0).toFixed(4);
+    const loading = (msg) => `<div class="state"><div class="spinner"></div><div>${esc(msg||'Loading…')}</div></div>`;
+    const empty = (msg) => `<div class="state"><div style="font-size:22px;opacity:.5">∅</div><div>${esc(msg)}</div></div>`;
+    const errBanner = (e) => `<div class="banner"><span>⚠</span><span>${esc((e&&e.message)||String(e))}</span></div>`;
+
+    // pill color buckets keyed by well-known lifecycle / tier / outcome values
+    const PILLMAP = {
+      active:'green', success:'green', allowed:'green', approved:'green', healthy:'green', provisioned:'green',
+      killed:'red', error:'red', denied:'red', rejected:'red', failed:'red', decommissioned:'red', destroyed:'red',
+      suspended:'blue', suspending:'amber', resuming:'amber', destroying:'amber',
+      pending:'amber', requested:'amber', 'in-review':'amber',
+      production:'teal', stable:'teal',
+      'critical-path':'purple', 'wide-operational':'blue', 'light-operational':'teal', poc:'amber',
+      experimental:'amber', deprecated:'red',
+    };
+    const pill = (v, cls) => `<span class="pill ${cls || PILLMAP[String(v||'').toLowerCase()] || ''}">${esc(v)}</span>`;
+
+    // Classification evidence record (WS1) — keep keys in sync with the project schema.
+    const SECURITY_REVIEW_STATUSES = ['', 'not-started', 'requested', 'in-review', 'approved', 'waived'];
+    const STATE_LOSS_POSTURES = ['', 'stateless', 'recoverable', 'durable-critical'];
+    const EVIDENCE_FIELDS = [
+      {k:'requested_classification', label:'Requested classification'},
+      {k:'repo_or_source_url', label:'Repo / source URL'},
+      {k:'business_owner', label:'Business owner'},
+      {k:'technical_owner', label:'Technical owner'},
+      {k:'team_or_org_of_record', label:'Team / org of record'},
+      {k:'support_contact', label:'Support contact'},
+      {k:'runbook_url', label:'Runbook URL'},
+      {k:'monitoring_or_logs_url', label:'Monitoring / logs URL'},
+      {k:'ci_status_url', label:'CI status URL'},
+      {k:'critical_flow_test_or_eval_url', label:'Critical-flow test / eval URL'},
+      {k:'state_loss_posture', label:'State-loss posture', enum:STATE_LOSS_POSTURES},
+      {k:'stack_exception', label:'Stack exception'},
+      {k:'security_review_status', label:'Security review status', enum:SECURITY_REVIEW_STATUSES},
+      {k:'architecture_summary_url', label:'Architecture summary URL'},
+      {k:'incident_path', label:'Incident path'},
+      {k:'slo_or_service_target', label:'SLO / service target'},
+      {k:'rpo_rto', label:'RPO / RTO'},
+      {k:'decommission_path', label:'Decommission path'},
+      {k:'executive_accountable_owner', label:'Executive accountable owner'},
+      {k:'risk_acceptance_url', label:'Risk acceptance URL'},
+      {k:'dr_exercise_evidence_url', label:'DR exercise evidence URL'},
+      {k:'audit_retention_requirement', label:'Audit retention requirement'},
+      {k:'recurring_review_date', label:'Recurring review date'},
+      {k:'maintainers', label:'Maintainers', list:true},
+      {k:'critical_dependencies', label:'Critical dependencies', list:true},
+      {k:'primary_data_flows', label:'Primary data flows', list:true},
+    ];
+    function evidenceView(p){
+      const rows = EVIDENCE_FIELDS.map(f => {
+        let v = p[f.k];
+        if (f.list) { v = Array.isArray(v) ? v : []; if (!v.length) return ''; v = v.map(esc).join(', '); }
+        else { v = v == null ? '' : String(v); if (!v) return ''; v = esc(v); }
+        return `<div><div class="muted" style="font-size:11px">${esc(f.label)}</div>${v}</div>`;
+      }).filter(Boolean);
+      const inner = rows.length
+        ? `<div class="row" style="gap:24px;flex-wrap:wrap">${rows.join('')}</div>`
+        : `<span class="muted" style="font-size:13px">No evidence recorded yet — click Edit evidence to add it.</span>`;
+      return `<div class="card" style="margin-top:12px">${inner}</div>`;
+    }
+    function evidenceForm(p){
+      const cell = (f) => {
+        if (f.enum) {
+          const opts = f.enum.map(o => `<option${(p[f.k]||'')===o?' selected':''}>${esc(o)}</option>`).join('');
+          return `<label style="display:flex;flex-direction:column;gap:3px;font-size:11px" class="muted">${esc(f.label)}<select data-ev="${f.k}">${opts}</select></label>`;
+        }
+        const val = f.list ? (Array.isArray(p[f.k]) ? p[f.k].join(', ') : '') : (p[f.k]||'');
+        return `<label style="display:flex;flex-direction:column;gap:3px;font-size:11px" class="muted">${esc(f.label)}<input data-ev="${f.k}" value="${esc(val)}" placeholder="${f.list?'comma-separated':''}"/></label>`;
+      };
+      return `<div class="card" style="margin-top:12px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px">${EVIDENCE_FIELDS.map(cell).join('')}</div>
+        <div class="row" style="margin-top:12px"><button class="act" id="ev-save">Save evidence</button>
+        <button class="pbtn" id="ev-cancel">Cancel</button><span id="ev-out" style="margin-left:8px"></span></div>
+      </div>`;
+    }
+
+    // WS2 promotion card: the next-tier checklist + request control. `cl` is the
+    // server-computed checklist (current tier, next tier, evidence verdict).
+    function promotionCard(cl, decommissioned){
+      if (!cl) return '';
+      if (!cl.next_tier) return `<div class="card" style="margin-top:12px"><span class="muted" style="font-size:13px">At the highest classification tier (<b>${esc(cl.current)}</b>) — no further promotion.</span></div>`;
+      const v = cl.verdict || {};
+      const missing = v.missing || [], exc = v.exception_signals || [], unv = v.unverified_signals || [];
+      const auto = v.evidence_complete && exc.length === 0 && cl.next_tier === 'light-operational';
+      const labelFor = k => (EVIDENCE_FIELDS.find(f => f.k === k) || {}).label || k;
+      const rows = missing.length
+        ? missing.map(k => `<div class="row" style="gap:8px;align-items:center">${pill('missing','red')} <span style="font-size:13px">${esc(labelFor(k))}</span></div>`).join('')
+        : `<div class="row" style="gap:8px;align-items:center">${pill('ready','green')} <span style="font-size:13px">All required evidence present</span></div>`;
+      const excRows = exc.map(s => `<div class="row" style="gap:8px;align-items:center">${pill('review','amber')} <span style="font-size:13px">${esc(s)}</span></div>`).join('');
+      const route = auto ? pill('auto-approves','green') : pill('routes to human review','amber');
+      const btn = decommissioned ? '' : `<button class="act" id="promote-btn">Request promotion</button>`;
+      return `<div class="card" style="margin-top:12px">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <div><b>Promote to ${esc(cl.next_tier)}</b> ${route}</div>${btn}
+        </div>
+        <div style="margin-top:10px;display:grid;gap:6px">${rows}${excRows}</div>
+        ${unv.length ? `<details style="margin-top:10px"><summary style="cursor:pointer;color:var(--muted);font-size:12px">${unv.length} signals Asgard can't verify automatically</summary><div style="margin-top:6px;display:grid;gap:4px">${unv.map(s => `<div class="muted" style="font-size:12px">• ${esc(s)}</div>`).join('')}</div></details>` : ''}
+        <div id="promote-out" style="margin-top:8px"></div>
+      </div>`;
+    }
+    // WS3 review-date: deadline, expiry flag, and an extend control. Expiry is a
+    // flag (blocks nothing); only render when there's a deadline or it's expired.
+    function reviewCard(p, decommissioned){
+      if (!p.review_date && p.review_state === 'ok') return '';
+      const expired = p.review_state === 'expired';
+      const flag = expired ? pill('review expired','red') : pill('on track','green');
+      const due = p.review_date ? `<span class="muted" style="font-size:12px">review due ${esc(String(p.review_date).slice(0,10))}</span>` : `<span class="muted" style="font-size:12px">no review deadline</span>`;
+      const ext = (p.review_extensions||0) ? `<span class="muted" style="font-size:12px">· ${p.review_extensions} extension(s) used</span>` : '';
+      const btn = decommissioned ? '' : `<button class="act" id="extend-btn">Extend review</button>`;
+      return `<div class="card" style="margin-top:12px">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <div class="row" style="gap:10px;align-items:center">${flag} ${due} ${ext}</div>${btn}
+        </div><div id="extend-out" style="margin-top:8px"></div></div>`;
+    }
+    // Demote control: pick a lower tier + mandatory reason (owners only, never automatic).
+    function demoteControl(p){
+      const order = ['poc','light-operational','wide-operational','critical-path'];
+      const lower = order.slice(0, order.indexOf(p.classification));
+      if (!lower.length) return '';
+      return `<details class="card" style="margin-top:12px"><summary style="cursor:pointer;color:var(--muted);font-size:13px">Demote classification</summary>
+        <div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap;align-items:center">
+          <span class="muted" style="font-size:12px">to</span>
+          <select id="demote-target">${lower.map(c=>`<option>${c}</option>`).join('')}</select>
+          <input id="demote-reason" placeholder="reason (required)" style="flex:1;min-width:200px"/>
+          <button class="danger" id="demote-btn">Demote</button>
+        </div><div id="demote-out" style="margin-top:8px"></div></details>`;
+    }
+
+    const tabs = {
+      start:    { label: 'Getting started', ic: '✦', render: renderGettingStarted },
+      catalog:  { label: 'Catalog', ic: '▦', render: renderCatalog },
+      guidance: { label: 'Guidance', ic: '◰', render: renderGuidance },
+      recipes:  { label: 'Recipes', ic: '⧉', render: renderRecipes },
+      standards:{ label: 'Standards', ic: '§', render: renderStandards },
+      projects: { label: 'Projects', ic: '◧', render: renderProjects },
+      costdash: { label: 'Cost dashboard', ic: '◴', render: renderCostDash, full: true },
+      governance:{ label: 'Governance', ic: '◎', render: renderGovernanceDash },
+      cost:     { label: 'Cost report', ic: '∑', render: renderCost },
+      audit:    { label: 'Audit', ic: '☰', render: renderAudit },
+      users:    { label: 'Users', ic: '⚇', render: renderUsers, need: 'admin' },
+      about:    { label: 'About', ic: 'ⓘ', render: renderAbout },
+    };
+    let active = 'start';
+    // Deep-link target: when set, the projects tab opens straight to this detail
+    // (used by the governance scorecard's offender drill-in).
+    let focusProject = null;
+    let currentRole = 'member';
+    const isAdmin = () => currentRole === 'admin';
+    // Cost views are visible to everyone — each is scoped server-side to the
+    // projects the caller owns or manages (Admin/Finance see all). Only the Users
+    // page is role-restricted.
+    const tabAllowed = (t) => !t.need || (t.need === 'admin' ? isAdmin() : true);
+
+    function renderNav() {
+      const nav = document.getElementById('nav'); nav.innerHTML = '';
+      for (const [k, t] of Object.entries(tabs)) {
+        if (!tabAllowed(t)) continue;
+        const b = el(`<button class="${k===active?'active':''}"><span class="ic">${t.ic}</span><span>${t.label}</span></button>`);
+        b.onclick = () => go(k);
+        nav.appendChild(b);
+      }
+    }
+
+    function go(k) {
+      if (!tabAllowed(tabs[k])) k = 'start';
+      active = k; renderNav();
+      document.getElementById('view').className = tabs[k].full ? 'full' : 'wrap';
+      tabs[k].render();
+    }
+
+    // ---------- Getting started (the first thing a new user sees) ----------
+    const snip = (code) => {
+      const c = esc(code);
+      return `<div class="snip"><button class="cp" data-cp="${c}">copy</button>${c}</div>`;
+    };
+    function wireCopy(root) {
+      root.querySelectorAll('.cp').forEach(b => b.onclick = async () => {
+        try { await navigator.clipboard.writeText(b.dataset.cp); const t = b.textContent; b.textContent = 'copied'; setTimeout(()=>b.textContent=t, 1200); }
+        catch { b.textContent = 'copy failed'; }
+      });
+    }
+
+    function connectStep(token) {
+      const base = location.origin + '/mcp';
+      const minted = !!token;
+      const exportLine = `export ASGARD_PAT=${token || 'asg_pat_your_user_token'}`;
+      // Every client below reads the PAT from $ASGARD_PAT, so the literal token is
+      // never typed into the command or written into a config file. Codex sources
+      // it at call time via bearer_token_env_var.
+      const claude = `claude mcp add --transport http asgard ${base} \\\n  --header "Authorization: Bearer $ASGARD_PAT"`;
+      const codex = `[mcp_servers.asgard]\nurl = "${base}"\nbearer_token_env_var = "ASGARD_PAT"`;
+      const cursor = JSON.stringify({ mcpServers: { asgard: { url: base, headers: { Authorization: 'Bearer ${ASGARD_PAT}' } } } }, null, 2);
+      const tokenBlock = minted
+        ? `<div class="card" style="border-color:var(--teal);margin:10px 0 0">
+            <p style="margin:0 0 6px;font-weight:700;color:var(--teal2)">✓ PAT created — shown once, copy it now</p>
+            ${snip(token)}
+            <p class="muted" style="margin:10px 0 4px;font-size:12px">Then export it, so it lives in your environment and the snippets below pick it up — not the literal token in a command or config:</p>${snip(exportLine)}
+            <p class="muted" style="margin:10px 0 0;font-size:11px">Need another, or want to revoke this one? Manage your tokens on the <a href="#" id="gs-to-users">Users page</a>.</p></div>`
+        : `<div id="gs-token-out"></div><p class="muted" style="margin:8px 0 0;font-size:12px">After creating it, export it as <code>ASGARD_PAT</code> so the snippets below resolve it.</p>`;
+      return `<div class="step"><div class="n">1</div><div class="b">
+        <h3>Create a Personal Access Token (PAT)</h3>
+        <p class="muted" style="margin:0 0 6px;font-size:13px">The PAT is your key to Asgard's MCP server — a long-lived <strong>user token</strong> tied to you. It lets your agent register projects and act on every project you own or manage; no per-project juggling.</p>
+        ${minted ? '' : `<div class="row" style="margin:0 0 8px"><button class="act" id="gs-token">Create a PAT</button></div>`}
+        ${tokenBlock}
+      </div></div>
+      <div class="step"><div class="n">2</div><div class="b">
+        <h3>Connect your agent over MCP</h3>
+        <p class="muted" style="margin:0 0 6px;font-size:13px">Add Asgard's MCP server to your agent. Each client below references <code>$ASGARD_PAT</code> — you never paste the literal token into the command.</p>
+        <div class="muted" style="font-size:12px;margin-top:8px">Claude Code</div>${snip(claude)}
+        <div class="muted" style="font-size:12px;margin-top:10px">Codex (<code>~/.codex/config.toml</code>)</div>${snip(codex)}
+        <div class="muted" style="font-size:12px;margin-top:10px">Cursor / generic Streamable-HTTP client (mcp.json)</div>${snip(cursor)}
+        <p class="muted" style="margin:10px 0 0;font-size:12px">Once connected, <code>tools/list</code> shows <code>register_project</code>, <code>request_resource</code>, <code>seed_plan</code>, and the rest. Tell your agent: <em>"read the Asgard standards, register this project, then build."</em></p>
+        <p class="muted" style="font-size:11px;margin-top:8px">Deploying an app or CI that lives in a single project? Register one below and mint a <strong>per-project key</strong> there instead — it's scoped to that one project.</p>
+      </div></div>`;
+    }
+
+    function wireConnect(root) {
+      wireCopy(root);
+      const toUsers = root.querySelector('#gs-to-users');
+      if (toUsers) toUsers.onclick = (e) => { e.preventDefault(); go('users'); };
+      const tb = root.querySelector('#gs-token');
+      if (!tb) return;
+      tb.onclick = async () => {
+        const out = root.querySelector('#gs-token-out');
+        tb.disabled = true; const t0 = tb.textContent; tb.textContent = 'minting…';
+        try {
+          const pat = await api('/api/auth/tokens', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ name: 'agent' }) });
+          // A stale server can answer this POST with the SPA HTML fallback (200) —
+          // surface that loudly instead of silently re-rendering an identical state.
+          if (!pat || typeof pat !== 'object' || !pat.token) throw new Error('Token endpoint returned no token — the server may be out of date. Rebuild and restart Asgard.');
+          const cc = document.getElementById('gs-connect');
+          cc.innerHTML = connectStep(pat.token);
+          wireConnect(cc);
+        } catch (e) {
+          tb.disabled = false; tb.textContent = t0;
+          if (out) out.innerHTML = errBanner(e);
+        }
+      };
+    }
+
+    async function renderGettingStarted() {
+      const v = document.getElementById('view');
+      let groups = { open: true, groups: [] };
+      let pol = { require_manager: true, require_group: true };
+      try { groups = await api('/api/groups'); } catch {}
+      try { pol = (await api('/api/auth/config')).registration || pol; } catch {}
+      const groupReq = pol.require_group;
+      const groupOpts = groups.open
+        ? `<input id="gs-group" placeholder="${groupReq ? 'group / cost-center' : 'group (optional)'}" />`
+        : `<select id="gs-group">${groupReq ? '' : '<option value="">— ungrouped —</option>'}${groups.groups.map(g=>`<option value="${esc(g.key)}">${esc(g.display_name||g.key)} (${esc(g.cost_center)})</option>`).join('')}</select>`;
+      const managerPh = pol.require_manager ? 'manager email' : 'manager email (defaults to you)';
+      v.innerHTML = `<h1 class="pagehead">Getting started</h1>
+      <p class="pagesub">A few steps to go from a running Asgard to your agent deploying a resource — governed, attributed, and audited.</p>
+      <div class="card" id="gs-connect">${connectStep(null)}</div>
+      <div class="card"><div class="step"><div class="n">3</div><div class="b">
+        <h3>Register a project</h3>
+        <p class="muted" style="margin:0 0 8px;font-size:13px">Registration is the gate: nothing provisions or spends until a project is registered and active. Everything it creates is attributed to it. Your connected agent can do this itself — or register one here and optionally mint a per-project key.</p>
+        <div class="row">
+          <input id="gs-name" placeholder="project name" />
+          <input id="gs-owner" placeholder="owner email" />
+          <input id="gs-manager" placeholder="${managerPh}" />
+          ${groupOpts}
+          <select id="gs-class">${['poc','light-operational','wide-operational','critical-path'].map(c=>`<option>${c}</option>`).join('')}</select>
+          <input id="gs-budget" type="number" min="0" step="1" placeholder="budget USD" style="width:130px" />
+          <button class="act" id="gs-reg">Register &amp; Get Project ID</button>
+        </div>
+        <div id="gs-regout" style="margin-top:10px"></div>
+      </div></div></div>
+      <div class="card"><div class="step"><div class="n">4</div><div class="b">
+        <h3>Deploy your first resource</h3>
+        <p class="muted" style="margin:0 0 6px;font-size:13px">Your agent provisions by calling <code>request_resource</code>. Auto-approvable services (like object storage) provision immediately; cost-bearing ones (databases, load-balanced services) route to a manager for approval. A first, safe one:</p>
+        ${snip('request_resource s3-bucket { "name": "assets" }')}
+        <p class="muted" style="margin:10px 0 0;font-size:12px">Browse everything you can provision in the catalog, and watch spend land per-project on the Cost tab.</p>
+        <div class="row" style="margin-top:10px">
+          <button class="act" id="gs-cat">Browse the catalog</button>
+          <button class="act" id="gs-cost" style="background:var(--chip);color:var(--fg);border:1px solid var(--line)">View cost</button>
+        </div>
+      </div></div></div>`;
+      wireConnect(document.getElementById('gs-connect'));
+      wireCopy(v);
+      document.getElementById('gs-cat').onclick = () => go('catalog');
+      const gsCost = document.getElementById('gs-cost');
+      if (gsCost) gsCost.onclick = () => go('costdash');
+      document.getElementById('gs-reg').onclick = async () => {
+        const out = document.getElementById('gs-regout');
+        const body = {
+          name: document.getElementById('gs-name').value.trim(),
+          owner_email: document.getElementById('gs-owner').value.trim(),
+          manager_email: document.getElementById('gs-manager').value.trim(),
+          group: document.getElementById('gs-group').value.trim(),
+          classification: document.getElementById('gs-class').value,
+          budget_usd: Number(document.getElementById('gs-budget').value || 0),
+        };
+        if (!body.name || !body.owner_email) { out.innerHTML = errBanner('Name and owner are required.'); return; }
+        if (pol.require_manager && !body.manager_email) { out.innerHTML = errBanner('Manager is required.'); return; }
+        if (pol.require_group && !body.group) { out.innerHTML = errBanner('Group is required.'); return; }
+        out.innerHTML = loading('Registering…');
+        try {
+          const p = await api('/api/projects', { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(body) });
+          const pid = p.project_id;
+          const k = await api(`/api/projects/${encodeURIComponent(pid)}/keys`, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({name:'agent'}) });
+          out.innerHTML = `<p style="margin:0 0 2px">Registered ${pill(p.lifecycle||'active')} <code>${esc(pid)}</code></p>
+            <p class="muted" style="font-size:12px;margin:6px 0 2px">Per-project key — shown once, copy it now (use it for an app/CI scoped to this project):</p>${snip(k.key)}`;
+          wireCopy(out);
+        } catch (e) { out.innerHTML = errBanner(e); }
+      };
+    }
+
+    // ---------- Guidance (governed how-to playbooks; agent-authored too) ----------
+    async function renderGuidance() {
+      const v = document.getElementById('view');
+      v.innerHTML = `<h1 class="pagehead">Guidance</h1>
+        <p class="pagesub">How-to playbooks, readable by people and by agents over MCP. Anyone (or any agent) can submit a draft; an admin approves before it's published.</p>
+        <div id="g-root">${loading('Loading guidance…')}</div>`;
+      const root = () => document.getElementById('g-root');
+      const CATS = [['', 'All'], ['best-practice', 'Best practice'], ['guide', 'Guides'], ['reference', 'Reference']];
+      const facet = (k, l) => `<button data-cat="${k}" style="padding:4px 11px;border-radius:999px;border:1px solid ${cat === k ? 'var(--teal)' : 'var(--line)'};background:${cat === k ? 'var(--teal)' : 'transparent'};color:${cat === k ? '#04201d' : 'var(--fg)'};cursor:pointer;font-size:12px;font-weight:${cat === k ? 700 : 400}">${l}</button>`;
+      let cat = '', all = [];
+      // Server-side category + full-text filter (?category / ?q); the client-side
+      // box stays as an instant-narrowing nicety over what the server returned.
+      async function load(q) {
+        const p = new URLSearchParams();
+        if (cat) p.set('category', cat);
+        if (q) p.set('q', q);
+        const qs = p.toString();
+        all = await api('/api/guidance' + (qs ? `?${qs}` : ''));
+      }
+      try { await load(''); } catch (e) { root().innerHTML = errBanner(e); return; }
+
+      const authorBox = () => `<details class="card" style="margin-bottom:14px"><summary style="cursor:pointer;color:var(--muted)">✎ Write guidance ${isAdmin()?'':'(submitted as a draft for admin approval)'}</summary>
+        <div class="row" style="margin-top:10px">
+          <input id="g-title" placeholder="title" style="flex:1;min-width:200px" />
+          <select id="g-cat">${CATS.filter(([k]) => k).map(([k, l]) => `<option value="${k}"${k === 'guide' ? ' selected' : ''}>${l}</option>`).join('')}</select>
+          <input id="g-tags" placeholder="tags (comma-separated)" />
+        </div>
+        <input id="g-summary" placeholder="one-line summary" style="width:100%;margin-top:8px" />
+        <textarea id="g-body" placeholder="Markdown body — the actual how-to." style="width:100%;margin-top:8px;min-height:120px;background:var(--code);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:10px;font-family:var(--mono);font-size:12px"></textarea>
+        <div class="row" style="margin-top:8px"><button class="act" id="g-save">${isAdmin()?'Publish':'Submit for approval'}</button><span id="g-saveout" class="muted" style="font-size:12px"></span></div>
+      </details>`;
+
+      function showList(q) {
+        const ql = (q || '').toLowerCase();
+        const list = !ql ? all : all.filter(g => (g.title + ' ' + g.summary + ' ' + (g.tags || []).join(' ') + ' ' + g.body).toLowerCase().includes(ql));
+        const cards = list.map(g => `<div class="card lcard" data-slug="${esc(g.slug)}">
+            <div class="row" style="justify-content:space-between">
+              <div class="ttl">${esc(g.title)} ${g.category ? pill(g.category, '') : ''} ${g.status === 'pending' ? pill('pending approval', 'amber') : ''}</div>
+              <div>${(g.tags || []).map(t => pill(t, 'blue')).join(' ')}</div>
+            </div>
+            ${g.summary ? `<p class="muted" style="font-size:12px;margin:6px 0 0">${esc(g.summary)}</p>` : ''}
+          </div>`).join('');
+        root().innerHTML = `<div class="row" style="margin-bottom:10px"><input id="g-q" placeholder="search guidance… (Enter searches every doc)" value="${esc(q || '')}" style="flex:1;max-width:360px" /></div>
+          <div class="row" style="gap:6px;margin-bottom:12px">${CATS.map(([k, l]) => facet(k, l)).join('')}</div>
+          ${authorBox()}
+          ${list.length ? cards : empty(ql ? 'No guidance matches.' : 'No guidance yet. Submit one above, or have your agent draft it via guidance_put.')}`;
+        const qi = document.getElementById('g-q');
+        qi.oninput = () => showList(qi.value);
+        qi.onkeydown = async (e) => { if (e.key === 'Enter') { try { await load(qi.value); showList(qi.value); } catch (err) { alert(err.message); } } };
+        root().querySelectorAll('[data-cat]').forEach(c => c.onclick = async () => { cat = c.dataset.cat; try { await load(''); showList(''); } catch (e) { alert(e.message); } });
+        root().querySelectorAll('.lcard').forEach(c => c.onclick = () => showDetail(c.dataset.slug));
+        wireAuthor();
+      }
+
+      function showDetail(slug) {
+        const g = all.find(x => x.slug === slug);
+        if (!g) return showList('');
+        root().innerHTML = `<button class="crumb">← all guidance</button>
+          <div class="row" style="justify-content:space-between;align-items:flex-start">
+            <h2 style="margin:0 0 4px">${esc(g.title)} ${g.category ? pill(g.category, '') : ''} ${g.status === 'pending' ? pill('pending approval', 'amber') : ''}</h2>
+            <div>${(g.tags || []).map(t => pill(t, 'blue')).join(' ')}</div>
+          </div>
+          <div class="muted" style="font-size:11px;margin-bottom:6px">by ${esc(g.author || '—')} · ${esc((g.updated_at || '').slice(0, 10))} · <code>${esc(g.slug)}</code></div>
+          ${isAdmin() && g.status === 'pending' ? `<button class="act" id="g-approve">Approve &amp; publish</button>` : ''}
+          <div class="md" style="margin-top:12px">${mdToHtml(g.body)}</div>
+          ${historyBox()}`;
+        root().querySelector('.crumb').onclick = () => showList('');
+        const ap = document.getElementById('g-approve');
+        if (ap) ap.onclick = async () => { try { await api(`/api/guidance/${encodeURIComponent(slug)}/approve`, { method: 'POST' }); await load(''); showDetail(slug); } catch (e) { alert(e.message); } };
+        wireHistory(root(), 'guidance', slug, g.body || '');
+      }
+
+      function wireAuthor() {
+        const btn = document.getElementById('g-save');
+        if (!btn) return;
+        btn.onclick = async () => {
+          const out = document.getElementById('g-saveout');
+          const body = {
+            title: document.getElementById('g-title').value.trim(),
+            summary: document.getElementById('g-summary').value.trim(),
+            body: document.getElementById('g-body').value,
+            tags: document.getElementById('g-tags').value.split(',').map(s => s.trim()).filter(Boolean),
+            category: document.getElementById('g-cat').value,
+          };
+          if (!body.title || !body.body) { out.innerHTML = errBanner('Title and body are required.'); return; }
+          try {
+            await api('/api/guidance', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+            await load('');
+            showList('');
+          } catch (e) { out.innerHTML = errBanner(e); }
+        };
+      }
+
+      showList('');
+    }
+
+    // ---------- Recipes (parameterized compositions the agent executes) ----------
+    async function renderRecipes() {
+      const v = document.getElementById('view');
+      v.innerHTML = `<h1 class="pagehead">Recipes</h1>
+        <p class="pagesub">Parameterized compositions of catalog primitives. An agent reads one over MCP (<code>recipe_get</code>), fills the inputs, and issues each step's <code>request_resource</code> itself — so every step is still cost-attributed, tier-gated, and approved on its own.</p>
+        <div id="r-root">${loading('Loading recipes…')}</div>`;
+      const root = () => document.getElementById('r-root');
+      let all = [];
+      async function load(q) {
+        all = await api('/api/recipes' + (q ? `?q=${encodeURIComponent(q)}` : ''));
+      }
+      try { await load(''); } catch (e) { root().innerHTML = errBanner(e); return; }
+      const synopsis = (r) => r.summary || (r.spec && r.spec.description) || '';
+
+      function showList(q) {
+        const ql = (q || '').toLowerCase();
+        const list = !ql ? all : all.filter(r => (r.name + ' ' + synopsis(r) + ' ' + (r.tags || []).join(' ') + ' ' + JSON.stringify(r.spec || {})).toLowerCase().includes(ql));
+        const cards = list.map(r => {
+          const spec = r.spec || {};
+          const svcs = [...new Set((spec.steps || []).map(s => s.service))];
+          return `<div class="card lcard" data-slug="${esc(r.slug)}">
+            <div class="row" style="justify-content:space-between">
+              <div class="ttl">${esc(r.name)} ${r.status === 'pending' ? pill('pending approval', 'amber') : ''}</div>
+              <div>${(r.tags || []).map(t => pill(t, 'blue')).join(' ')}</div>
+            </div>
+            <p class="muted" style="font-size:12px;margin:6px 0 8px;line-height:1.5">${esc(synopsis(r).slice(0, 240))}</p>
+            <div class="muted" style="font-size:11px">${(spec.steps || []).length} steps · ${svcs.map(s => pill(s, '')).join(' ')}</div>
+          </div>`;
+        }).join('');
+        root().innerHTML = `<div class="row" style="margin-bottom:12px"><input id="r-q" placeholder="search recipes… (Enter searches every recipe)" value="${esc(q || '')}" style="flex:1;max-width:360px" /></div>
+          ${list.length ? cards : empty(ql ? 'No recipes match.' : 'No recipes yet. An agent can draft one with recipe_put.')}`;
+        const qi = document.getElementById('r-q');
+        qi.oninput = () => showList(qi.value);
+        qi.onkeydown = async (e) => { if (e.key === 'Enter') { try { await load(qi.value); showList(qi.value); } catch (err) { alert(err.message); } } };
+        root().querySelectorAll('.lcard').forEach(c => c.onclick = () => showDetail(c.dataset.slug));
+      }
+
+      function showDetail(slug) {
+        const r = all.find(x => x.slug === slug);
+        if (!r) return showList('');
+        const spec = r.spec || {};
+        const inputs = (spec.inputs || []).map(i => `<tr><td><code>${esc(i.name)}</code></td><td>${i.required ? pill('required', 'amber') : '<span class="muted">optional</span>'}</td><td class="muted">${i.default !== undefined ? 'default <code>' + esc(String(i.default)) + '</code> · ' : ''}${esc(i.description || '')}</td></tr>`).join('');
+        const steps = (spec.steps || []).map((s, n) => `<div class="card" style="margin:8px 0">
+            <div class="row"><span class="catic" style="width:24px;height:24px;font-size:12px">${n + 1}</span>
+              <strong>${esc(s.id || '')}</strong> ${pill(s.service || '', 'blue')}</div>
+            ${s.description ? `<p class="muted" style="font-size:12px;margin:6px 0">${esc(s.description)}</p>` : ''}
+            <div class="snip">${esc(JSON.stringify(s.inputs || {}, null, 2))}</div>
+          </div>`).join('');
+        const outs = spec.outputs ? `<h5>Outputs</h5><div class="snip">${esc(JSON.stringify(spec.outputs, null, 2))}</div>` : '';
+        const hasSpec = (spec.steps || []).length > 0;
+        // The runbook (body) is the content; the structured spec is a collapsed
+        // at-a-glance for an agent that wants the machine-readable step list.
+        const glance = hasSpec ? `<details class="card" style="margin-top:18px"><summary style="cursor:pointer;color:var(--muted)">Composition at a glance — ${(spec.steps || []).length} primitives</summary>
+          ${inputs ? `<h5>Inputs</h5><div class="tablewrap"><table><tbody>${inputs}</tbody></table></div>` : ''}
+          <h5>Steps</h5>${steps}
+          ${outs}</details>` : '';
+        root().innerHTML = `<button class="crumb">← all recipes</button>
+          <div class="row" style="justify-content:space-between;align-items:flex-start">
+            <h2 style="margin:0 0 4px">${esc(r.name)} ${r.status === 'pending' ? pill('pending approval', 'amber') : ''}</h2>
+            <div>${(r.tags || []).map(t => pill(t, 'blue')).join(' ')}</div>
+          </div>
+          <div class="muted" style="font-size:11px;margin-bottom:10px">by ${esc(r.author || '—')} · <code>${esc(r.slug)}</code></div>
+          ${isAdmin() && r.status === 'pending' ? `<button class="act" id="r-approve">Approve &amp; publish</button>` : ''}
+          <div class="md">${mdToHtml(r.body || spec.description || r.summary || '')}</div>
+          ${glance}
+          ${historyBox()}`;
+        root().querySelector('.crumb').onclick = () => showList('');
+        const ap = document.getElementById('r-approve');
+        if (ap) ap.onclick = async () => { try { await api(`/api/recipes/${encodeURIComponent(slug)}/approve`, { method: 'POST' }); await load(''); showDetail(slug); } catch (e) { alert(e.message); } };
+        wireHistory(root(), 'recipes', slug, r.body || spec.description || r.summary || '');
+      }
+
+      showList('');
+    }
+
+    // ---------- Standards + agent-seed (read-only audit of what agents are told) ----------
+    async function renderStandards() {
+      const v = document.getElementById('view');
+      v.innerHTML = `<h1 class="pagehead">Standards</h1>
+        <p class="pagesub">Exactly what agents are told, so you can audit it. <strong>Standards</strong> are the normative rules every agent must follow (admin-editable here, versioned, never mutable by agents); the <strong>agent seed</strong> is the layered repo guidance an agent pulls when it starts work (served over MCP as <code>get_standards</code> / <code>seed_plan</code>).</p>
+        <div id="s-root">${loading('Loading…')}</div>`;
+      const root = () => document.getElementById('s-root');
+      let standards = [], seed = [];
+      try { [standards, seed] = await Promise.all([api('/api/standards'), api('/api/seed')]); }
+      catch (e) { root().innerHTML = errBanner(e); return; }
+      const KINDS = [['core', 'Core — always in force'], ['language', 'Language add-ons'], ['domain', 'Domain overlays'], ['template', 'Templates']];
+
+      // Admin-only authoring: standards are normative, so edits are admin-gated,
+      // always published, and versioned (no draft queue). `prefill` populates the
+      // form when editing an existing standard.
+      const editorBox = (prefill) => !isAdmin() ? '' : `<details class="card" style="margin-bottom:14px" ${prefill ? 'open' : ''}><summary style="cursor:pointer;color:var(--muted)">✎ ${prefill ? 'Edit' : 'Add'} a standard (admin)</summary>
+        <div class="row" style="margin-top:10px">
+          <input id="s-id" placeholder="id (e.g. coding)" value="${esc(prefill?.id || '')}" ${prefill ? 'readonly' : ''} style="${prefill ? 'opacity:.6;' : ''}max-width:180px" />
+          <input id="s-title" placeholder="title" value="${esc(prefill?.title || '')}" style="flex:1;min-width:200px" />
+        </div>
+        <input id="s-summary" placeholder="one-line summary" value="${esc(prefill?.summary || '')}" style="width:100%;margin-top:8px" />
+        <textarea id="s-body" placeholder="Markdown body — the normative rule set." style="width:100%;margin-top:8px;min-height:140px;background:var(--code);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:10px;font-family:var(--mono);font-size:12px">${esc(prefill?.body || '')}</textarea>
+        <div class="row" style="margin-top:8px"><button class="act" id="s-save">${prefill ? 'Save new version' : 'Publish standard'}</button><span id="s-saveout" class="muted" style="font-size:12px"></span></div>
+      </details>`;
+
+      function wireEditor() {
+        const btn = document.getElementById('s-save');
+        if (!btn) return;
+        btn.onclick = async () => {
+          const out = document.getElementById('s-saveout');
+          const body = {
+            id: document.getElementById('s-id').value.trim(),
+            title: document.getElementById('s-title').value.trim(),
+            summary: document.getElementById('s-summary').value.trim(),
+            body: document.getElementById('s-body').value,
+          };
+          if (!body.id || !body.title || !body.body) { out.innerHTML = errBanner('Id, title, and body are required.'); return; }
+          try {
+            await api('/api/standards', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+            standards = await api('/api/standards');
+            showList();
+          } catch (e) { out.innerHTML = errBanner(e); }
+        };
+      }
+
+      function showList() {
+        const stdCards = standards.map(s => `<div class="card lcard" data-src="standards" data-id="${esc(s.id)}">
+            <div class="ttl">${esc(s.title)}</div>
+            <p class="muted" style="font-size:12px;margin:6px 0 0">${esc(s.summary || '')}</p></div>`).join('');
+        const seedSection = KINDS.map(([k, label]) => {
+          const items = seed.filter(m => m.kind === k);
+          if (!items.length) return '';
+          return `<h5 style="margin:16px 0 6px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-size:11px">${label}</h5>` +
+            items.map(m => `<div class="card lcard" data-src="seed" data-id="${esc(m.id)}">
+              <div class="row" style="justify-content:space-between">
+                <div class="ttl">${esc(m.title)}</div>
+                <div>${pill(m.tier, 'blue')}${(m.languages || []).map(l => pill(l, '')).join('')}</div>
+              </div>
+              <p class="muted" style="font-size:12px;margin:6px 0 0">${esc(m.summary || '')} <code style="font-size:11px">${esc(m.path)}</code></p></div>`).join('');
+        }).join('');
+        root().innerHTML = `<h4>Standards <span class="muted" style="font-weight:400">(normative)</span></h4>${editorBox()}${stdCards || empty('No standards.')}
+          <h4 style="margin-top:22px">Agent seed <span class="muted" style="font-weight:400">(repo bootstrap)</span></h4>${seedSection}`;
+        root().querySelectorAll('.lcard').forEach(c => c.onclick = () => showDetail(c.dataset.src, c.dataset.id));
+        wireEditor();
+      }
+
+      async function showDetail(src, id) {
+        root().innerHTML = loading('Loading…');
+        try {
+          const d = await api(`/api/${src}/${encodeURIComponent(id)}`);
+          const editable = src === 'standards' && isAdmin();
+          root().innerHTML = `<button class="crumb">← all standards</button>
+            <h2 style="margin:0 0 4px">${esc(d.title)}</h2>
+            <div class="muted" style="font-size:11px;margin-bottom:10px">${src === 'seed' ? `agent seed · ${esc(d.kind)} · ${esc(d.tier)} · ` : 'standard · '}<code>${esc(d.path || d.id)}</code></div>
+            ${editable ? editorBox(d) : ''}
+            <div class="md">${mdToHtml(d.body)}</div>
+            ${src === 'standards' ? historyBox() : ''}`;
+          root().querySelector('.crumb').onclick = () => showList();
+          if (editable) wireEditor();
+          if (src === 'standards') wireHistory(root(), 'standards', id, d.body || '');
+        } catch (e) { root().innerHTML = errBanner(e); root().querySelector?.('.crumb'); }
+      }
+
+      showList();
+    }
+
+    // ---------- Users (admin: roles + access) ----------
+    const ROLES = ['admin','finance','member'];
+    const ROLE_BLURB = {
+      admin: 'Full control — manage users, configure, approve, kill switch; sees all cost.',
+      finance: 'Full cost dashboard + reports across all projects; read-only elsewhere.',
+      member: 'The default. Registers projects and requests resources; sees cost + projects only where they are owner or manager (manager-ness is automatic, not a role).',
+    };
+    async function renderUsers() {
+      const v = document.getElementById('view');
+      v.innerHTML = `<h1 class="pagehead">Users</h1>
+        <p class="pagesub">Roles map to capabilities. OIDC users appear here after their first sign-in and can be assigned a role or disabled; local users are created below.</p>
+        <div class="card">
+          <h3>Create a local user</h3>
+          <div class="row">
+            <input id="u-name" placeholder="username" />
+            <input id="u-pw" type="password" placeholder="password" />
+            <input id="u-email" placeholder="email (optional)" />
+            <select id="u-role">${ROLES.map(r=>`<option value="${r}"${r==='member'?' selected':''}>${r}</option>`).join('')}</select>
+            <button class="act" id="u-add">Create</button>
+          </div>
+          <div id="u-addout" class="muted" style="margin-top:8px;font-size:12px">${esc(ROLE_BLURB.member)}</div>
+        </div>
+        <div class="card">
+          <div class="row" style="justify-content:space-between;align-items:center">
+            <h3 style="margin:0">Your access tokens (PATs)</h3>
+            <button class="act" id="pat-new">Create a PAT</button>
+          </div>
+          <p class="muted" style="margin:6px 0 0;font-size:12px">Long-lived credentials your agent uses over MCP. The full token is shown only once at creation — here you see the last 8 characters and when it was made. Revoke any you no longer use.</p>
+          <div id="pat-newout" style="margin-top:8px"></div>
+          <div id="pat-list" style="margin-top:10px">${loading('Loading tokens…')}</div>
+        </div>
+        <div id="u-list">${loading('Loading users…')}</div>`;
+      const roleSel = document.getElementById('u-role');
+      roleSel.onchange = () => { document.getElementById('u-addout').textContent = ROLE_BLURB[roleSel.value] || ''; };
+
+      // Personal access tokens — see + revoke (the full value is never re-shown).
+      const refreshTokens = async () => {
+        const out = document.getElementById('pat-list');
+        try {
+          const pats = await api('/api/auth/tokens');
+          if (!pats.length) { out.innerHTML = empty('No tokens yet. Create one above or on Getting started.'); return; }
+          const now = Date.now();
+          const statusOf = (p) => p.revoked_at ? pill('revoked', 'red')
+            : (p.expires_at && Date.parse(p.expires_at) < now) ? pill('expired', 'amber')
+            : pill('active', 'green');
+          const rows = pats.map(p => `<tr>
+              <td>${esc(p.name || 'agent')}</td>
+              <td><code>…${esc(p.suffix || '')}</code></td>
+              <td class="muted">${esc((p.created_at || '').slice(0, 10))}</td>
+              <td>${statusOf(p)}</td>
+              <td style="text-align:right">${p.revoked_at ? '' : `<button class="danger" data-revoke="${esc(p.id)}">Revoke</button>`}</td>
+            </tr>`).join('');
+          out.innerHTML = `<div class="tablewrap"><table>
+            <thead><tr><th>Name</th><th>Token</th><th>Created</th><th>Status</th><th></th></tr></thead>
+            <tbody>${rows}</tbody></table></div>`;
+          out.querySelectorAll('[data-revoke]').forEach(b => b.onclick = async () => {
+            if (!(await confirmAction({ title: 'Revoke token?', message: 'Any agent or client using this token will immediately lose access.', confirmLabel: 'Revoke' }))) return;
+            try { await api(`/api/auth/tokens/${encodeURIComponent(b.dataset.revoke)}`, { method: 'DELETE' }); await refreshTokens(); }
+            catch (e) { out.innerHTML = errBanner(e); }
+          });
+        } catch (e) { out.innerHTML = errBanner(e); }
+      };
+      document.getElementById('pat-new').onclick = async () => {
+        const out = document.getElementById('pat-newout');
+        try {
+          const pat = await api('/api/auth/tokens', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'agent' }) });
+          if (!pat || !pat.token) throw new Error('Token endpoint returned no token — the server may be out of date.');
+          out.innerHTML = `<div class="card" style="border-color:var(--teal)"><p style="margin:0 0 6px;font-weight:700;color:var(--teal2)">✓ Created — shown once, copy it now</p>${snip(pat.token)}</div>`;
+          wireCopy(out);
+          await refreshTokens();
+        } catch (e) { out.innerHTML = errBanner(e); }
+      };
+      refreshTokens();
+      const refresh = async () => {
+        const out = document.getElementById('u-list');
+        try {
+          const us = await api('/api/users');
+          if (!us.length) { out.innerHTML = empty('No users yet.'); return; }
+          const rows = us.map(u => `<tr>
+            <td><code>${esc(u.username)}</code>${u.active?'':' '+pill('disabled','red')}</td>
+            <td>${esc(u.display_name||'')}</td>
+            <td>${pill(u.provider, u.provider==='oidc'?'purple':'blue')}</td>
+            <td><select data-role="${esc(u.id)}">${ROLES.map(r=>`<option value="${r}"${u.role===r?' selected':''}>${r}</option>`).join('')}</select></td>
+            <td class="r"><button class="pbtn danger" data-active="${esc(u.id)}" data-to="${u.active?'0':'1'}">${u.active?'disable':'enable'}</button></td>
+          </tr>`).join('');
+          out.innerHTML = `<div class="tablewrap"><table><thead><tr>
+            <th>username</th><th>name</th><th>provider</th><th>role</th><th class="r">access</th>
+            </tr></thead><tbody>${rows}</tbody></table></div>`;
+          out.querySelectorAll('select[data-role]').forEach(s => s.onchange = async () => {
+            try { await api(`/api/users/${encodeURIComponent(s.dataset.role)}/role`, {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({role:s.value})}); refresh(); }
+            catch (e) { alert(e.message); }
+          });
+          out.querySelectorAll('button[data-active]').forEach(b => b.onclick = async () => {
+            if (b.dataset.to === '0' && !await confirmAction({ title: 'Disable this user?', message: 'They will be signed out and cannot log in until an admin re-enables them.', confirmLabel: 'Disable user' })) return;
+            try { await api(`/api/users/${encodeURIComponent(b.dataset.active)}/active`, {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({active:b.dataset.to==='1'})}); refresh(); }
+            catch (e) { alert(e.message); }
+          });
+        } catch (e) { out.innerHTML = errBanner(e); }
+      };
+      document.getElementById('u-add').onclick = async () => {
+        const body = {
+          username: document.getElementById('u-name').value.trim(),
+          password: document.getElementById('u-pw').value,
+          email: document.getElementById('u-email').value.trim() || null,
+          role: document.getElementById('u-role').value,
+        };
+        if (!body.username || !body.password) { document.getElementById('u-addout').innerHTML = errBanner('Username and password are required.'); return; }
+        try {
+          await api('/api/users', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+          document.getElementById('u-name').value=''; document.getElementById('u-pw').value=''; document.getElementById('u-email').value='';
+          refresh();
+        } catch (e) { document.getElementById('u-addout').innerHTML = errBanner(e); }
+      };
+      refresh();
+    }
+
+    // ---------- Cost dashboard (the human-first surface) ----------
+    const dash = { range: 'mtd', view: 'treemap', data: null, names: {} };
+
+    function windowFrom(range) {
+      const t = new Date();
+      const iso = d => d.toISOString().slice(0,10);
+      if (range === 'mtd') return iso(new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), 1)));
+      if (range === 'qtd') return iso(new Date(Date.UTC(t.getUTCFullYear(), Math.floor(t.getUTCMonth()/3)*3, 1)));
+      const days = { '7d':7, '30d':30, '60d':60 }[range] || 30;
+      const d = new Date(t); d.setUTCDate(d.getUTCDate()-days); return iso(d);
+    }
+
+    function flatten(tree) {
+      const leaves = [];
+      (function walk(n, group){ if(!n) return;
+        const g = n.level==='group' ? n.key : group;
+        if (n.level==='project') leaves.push({...n, group:g});
+        (n.children||[]).forEach(c => walk(c, g));
+      })(tree, null);
+      return leaves;
+    }
+
+    async function renderCostDash() {
+      const v = document.getElementById('view');
+      v.innerHTML = loading('Loading spend…');
+      let tree, movers, anoms, tagged, projects;
+      try {
+        [tree, movers, anoms, tagged, projects] = await Promise.all([
+          api('/api/cost/tree'), api('/api/cost/movers?top=8'),
+          api('/api/cost/anomalies'), api('/api/cost/tagged'), api('/api/projects'),
+        ]);
+      } catch (e) { v.innerHTML = `<div style="padding:24px">${errBanner(e)}</div>`; return; }
+      dash.names = {}; (projects||[]).forEach(p => dash.names[p.project_id] = { name:p.name, budget:p.budget_usd });
+      const leaves = flatten(tree);
+      dash.data = { tree, movers, anoms, tagged, leaves };
+
+      // group colors
+      const groups = (tree.children||[]).map(g=>g.key);
+      dash.gcolor = {}; groups.forEach((g,i)=>dash.gcolor[g]=PAL[i%PAL.length]);
+
+      const pressure = leaves.filter(l=>l.budget_pressure).length;
+      const overrun = leaves.reduce((s,l)=> s + (l.budget_usd>0 ? Math.max(0, l.eom_forecast_usd - l.budget_usd) : 0), 0);
+      const taggedPct = tagged.tagged_pct == null ? 100 : tagged.tagged_pct;
+      // org delta from group movers
+      const gc = (movers.by_group||[]).reduce((a,m)=>{a.cur+=m.current_usd;a.prev+=m.previous_usd;return a;},{cur:0,prev:0});
+      const odelta = gc.prev>0 ? (gc.cur-gc.prev)/gc.prev*100 : (gc.cur>0?100:0);
+
+      v.innerHTML = `
+      <div class="dtoolbar">
+        <div class="seg" id="range">${['mtd','7d','30d','60d','qtd'].map(r=>`<button data-r="${r}" class="${dash.range===r?'on':''}">${r.toUpperCase()}</button>`).join('')}</div>
+        <div style="flex:1"></div>
+        <div class="seg" id="vtoggle">
+          <button data-v="treemap" class="${dash.view==='treemap'?'on':''}">▦ Treemap</button>
+          <button data-v="radial" class="${dash.view==='radial'?'on':''}">◎ Radial</button>
+        </div>
+      </div>
+
+      <div class="kpis">
+        <div class="kpi">
+          <div class="lbl">MTD spend</div>
+          <div class="top"><span class="big num">${money(tree.mtd_usd)}</span>
+            <span class="chip ${odelta>0?'red':'green'}">${odelta>0?'▲':'▼'} ${Math.abs(odelta).toFixed(0)}%</span>
+            <span style="margin-left:auto">${miniSpark(leaves)}</span></div>
+        </div>
+        <div class="kpi">
+          <div class="lbl">Forecast EOM</div>
+          <div class="big num">${money(tree.eom_forecast_usd)}</div>
+          <div class="sub num">± ${money(tree.forecast_band)}</div>
+        </div>
+        <div class="kpi">
+          <div class="lbl">Tagged</div>
+          <div class="big num">${taggedPct.toFixed(1)}%</div>
+          <div class="sub">${tagged.tagged_pct==null?'tagged-only · no account total':'healthy'}</div>
+        </div>
+        <div class="kpi">
+          <div class="lbl">Anomalies · projected overrun</div>
+          <div class="top"><span class="big num" style="color:${anoms.length?'var(--amber)':'var(--fg)'}">${anoms.length}</span>
+            <span class="muted">·</span><span class="big num">${money(overrun)}</span></div>
+          <div class="sub">vs EOM budget</div>
+        </div>
+      </div>
+
+      <div class="body3">
+        <div class="colL">
+          <div class="sect">
+            <div class="lbl">Tagged audit</div><div class="sub">system account · MTD</div>
+            <div class="donutwrap">${donut(taggedPct)}
+              <div><div><b class="num">${money(tagged.tagged_usd)}</b> tagged to projects</div>
+              <div class="muted num">${money((tagged.account_total_usd||tagged.tagged_usd)-tagged.tagged_usd)} unattributed</div>
+              <div class="link" style="margin-top:8px">View ${leaves.length} attributed projects →</div></div></div>
+          </div>
+          <div class="sect" id="movers">
+            <div class="lbl">Top movers</div><div class="sub">vs previous month</div>
+            <div style="margin-top:8px">${moversHtml(movers.by_project)}</div>
+          </div>
+          <div class="sect">
+            <div class="lbl">Budget pressure</div><div class="sub">MTD / monthly cap</div>
+            <div style="margin-top:10px">${pressureHtml(leaves)}</div>
+          </div>
+        </div>
+
+        <div class="center" id="center"></div>
+
+        <div class="colR"><div class="chat" id="chat"></div></div>
+      </div>`;
+
+      document.querySelectorAll('#range button').forEach(b=>b.onclick=()=>{ dash.range=b.dataset.r;
+        document.querySelectorAll('#range button').forEach(x=>x.classList.toggle('on',x.dataset.r===dash.range)); renderCenter(); });
+      document.querySelectorAll('#vtoggle button').forEach(b=>b.onclick=()=>{ dash.view=b.dataset.v;
+        document.querySelectorAll('#vtoggle button').forEach(x=>x.classList.toggle('on',x.dataset.v===dash.view)); renderCenter(); });
+      renderChat();
+      renderCenter();
+    }
+
+    function nameOf(id){ return (dash.names[id] && dash.names[id].name) || id; }
+
+    function moversHtml(list){
+      if(!list || !list.length) return '<div class="muted">No movement vs last month.</div>';
+      return list.map((m,i)=>{ const c=PAL[i%PAL.length]; const up=m.delta_usd>=0;
+        return `<div class="mover">
+          <div class="bar" style="background:${c}"></div>
+          <div><div class="nm">${esc(nameOf(m.key))}</div><div class="id">${esc(m.key)}</div></div>
+          ${spark(seriesCache[m.key], c)}
+          <div><div class="pct" style="color:${up?'var(--red)':'var(--green)'}">${up?'+':''}${m.delta_pct.toFixed(0)}%</div>
+          <div class="delta num">${up?'+':''}${money(m.delta_usd)}</div></div>
+        </div>`; }).join('');
+    }
+
+    function pressureHtml(leaves){
+      const rows = leaves.slice().sort((a,b)=>{
+        const pa=a.budget_usd>0?a.eom_forecast_usd/a.budget_usd:0, pb=b.budget_usd>0?b.eom_forecast_usd/b.budget_usd:0;
+        return pb-pa; });
+      if(!rows.length) return '<div class="muted">No projects yet.</div>';
+      return rows.map(l=>{ const cap=l.budget_usd; const pctMtd=cap>0?Math.min(100,l.mtd_usd/cap*100):0;
+        return `<div class="pr"><div class="h"><span>${esc(nameOf(l.key))}</span><span class="num">${cap>0?pctMtd.toFixed(0):0}%</span></div>
+          <div class="track"><div class="fill ${l.budget_pressure?'hot':''}" style="width:${Math.max(2,pctMtd)}%"></div></div>
+          <div class="cap num">${money(l.mtd_usd)} / ${cap>0?money(cap):'no cap'}</div></div>`; }).join('');
+    }
+
+    function donut(pct){
+      const r=34, c=2*Math.PI*r, on=c*Math.min(100,pct)/100;
+      return `<svg width="92" height="92" viewBox="0 0 92 92">
+        <circle cx="46" cy="46" r="${r}" fill="none" stroke="#171b22" stroke-width="9"/>
+        <circle cx="46" cy="46" r="${r}" fill="none" stroke="var(--teal)" stroke-width="9" stroke-linecap="round"
+          stroke-dasharray="${on} ${c}" transform="rotate(-90 46 46)"/>
+        <text x="46" y="44" text-anchor="middle" fill="var(--fg)" font-size="15" font-weight="700" class="num">${pct.toFixed(1)}%</text>
+        <text x="46" y="58" text-anchor="middle" fill="var(--muted)" font-size="8" letter-spacing="1.5">TAGGED</text></svg>`;
+    }
+
+    // tiny sparklines
+    const seriesCache = {};
+    function spark(series, color){
+      if(!series || series.length<2) return `<svg width="60" height="26"></svg>`;
+      const cum={}; series.forEach(r=>{ if(r.cumulative_usd!=null) cum[r.day]=(cum[r.day]||0)+r.cumulative_usd; });
+      const pts=Object.keys(cum).sort().map(d=>cum[d]); if(pts.length<2) return `<svg width="60" height="26"></svg>`;
+      const mn=Math.min(...pts), mx=Math.max(...pts), rng=(mx-mn)||1, W=60, H=26;
+      const p=pts.map((y,i)=>`${(i/(pts.length-1)*W).toFixed(1)},${(H-2-((y-mn)/rng)*(H-4)).toFixed(1)}`).join(' ');
+      return `<svg width="${W}" height="${H}"><polyline fill="none" stroke="${color||'var(--teal)'}" stroke-width="1.6" points="${p}"/></svg>`;
+    }
+    function miniSpark(leaves){
+      // org cumulative across leaves' series
+      const byday={}; leaves.forEach(l=>{ const s=seriesCache[l.key]||[]; s.forEach(r=>{ if(r.cumulative_usd!=null) byday[r.day]=(byday[r.day]||0)+r.cumulative_usd; }); });
+      const pts=Object.keys(byday).sort().map(d=>byday[d]); if(pts.length<2) return '';
+      const mn=Math.min(...pts),mx=Math.max(...pts),rng=(mx-mn)||1,W=84,H=34;
+      const p=pts.map((y,i)=>`${(i/(pts.length-1)*W).toFixed(1)},${(H-3-((y-mn)/rng)*(H-6)).toFixed(1)}`).join(' ');
+      return `<svg width="${W}" height="${H}"><polyline fill="none" stroke="var(--teal)" stroke-width="2" points="${p}"/></svg>`;
+    }
+    async function loadSeries(ids){
+      const from = (()=>{ const d=new Date(); d.setUTCDate(d.getUTCDate()-30); return d.toISOString().slice(0,10); })();
+      await Promise.all(ids.map(async id => { if(seriesCache[id]) return;
+        try { const d = await api('/api/cost/project/'+encodeURIComponent(id)+'/series?from='+from); seriesCache[id]=d.series||[]; }
+        catch { seriesCache[id]=[]; } }));
+    }
+
+    async function renderCenter(){
+      const c = document.getElementById('center'); if(!c) return;
+      const leaves = dash.data.leaves;
+      // sizing: MTD uses tree; other ranges re-query windowed actuals by project
+      let sizeOf = {}; leaves.forEach(l=>sizeOf[l.key]=l.mtd_usd);
+      if (dash.range !== 'mtd') {
+        try { const by = await api(`/api/cost/by?dim=project&from=${windowFrom(dash.range)}`);
+          sizeOf = {}; (by.rows||[]).forEach(r=>sizeOf[r.key]=r.actual_usd); } catch {}
+      }
+      const items = leaves.map(l=>({ id:l.key, label:nameOf(l.key), group:l.group,
+        value:Math.max(0,sizeOf[l.key]||0), color: l.budget_pressure?'#f87171':(dash.gcolor[l.group]||'#2dd4bf'),
+        pressure:l.budget_pressure })).filter(i=>i.value>0);
+      const total = items.reduce((s,i)=>s+i.value,0);
+      c.innerHTML = `<div class="centerlabel"><div class="lbl">${dash.view==='radial'?'Radial · spend by org':'Treemap · spend by project'}</div>
+        <div class="sub num">${money(total)} across ${items.length} project(s)</div></div>`;
+      if(!items.length){ c.insertAdjacentHTML('beforeend','<div class="skel">No attributed spend in this window.</div>'); return; }
+      const W = c.clientWidth, H = c.clientHeight;
+      if (dash.view==='treemap') renderTreemap(c, items, W, H);
+      else renderRadial(c, leaves, dash.gcolor, W, H, total);
+    }
+
+    function renderTreemap(c, items, W, H){
+      const pad=14, x0=pad, y0=46, w=W-pad*2, h=H-y0-pad;
+      const rects = squarify(items.slice().sort((a,b)=>b.value-a.value), x0, y0, w, h);
+      rects.forEach(r=>{
+        const cell = el(`<div class="tmcell" style="left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;
+          background:${hexA(r.color,0.16)};border-color:${hexA(r.color,0.5)}">
+          <div class="tnm" style="color:${r.color}">${esc(r.label)}</div>
+          <div class="tval num">${money(r.value)}</div></div>`);
+        if(r.w<54||r.h<34){ cell.querySelector('.tval').style.display='none'; }
+        c.appendChild(cell);
+      });
+    }
+
+    // binary-split squarified treemap. Always peels a non-empty proper prefix so
+    // a single dominant item can't recurse into itself forever.
+    function squarify(items, x, y, w, h){
+      const out=[];
+      (function lay(it,x,y,w,h){
+        it=it.filter(i=>i.value>0);
+        if(!it.length) return;
+        if(it.length===1){ out.push({...it[0],x,y,w,h}); return; }
+        const tot=it.reduce((s,i)=>s+i.value,0), half=tot/2;
+        let acc=0,idx=0; while(idx<it.length-1 && acc+it[idx].value<half){ acc+=it[idx].value; idx++; }
+        const cut=Math.min(idx+1, it.length-1), a=it.slice(0,cut), b=it.slice(cut);
+        const frac=a.reduce((s,i)=>s+i.value,0)/tot;
+        if(w>=h){ const ww=w*frac; lay(a,x,y,ww,h); lay(b,x+ww,y,w-ww,h); }
+        else { const hh=h*frac; lay(a,x,y,w,hh); lay(b,x,y+hh,w,h-hh); }
+      })(items.filter(i=>i.value>0),x,y,w,h);
+      return out;
+    }
+
+    // radial sunburst: inner ring = groups, outer ring = projects
+    function renderRadial(c, leaves, gcolor, W, H, total){
+      const cx=W/2, cy=46+(H-46)/2, R=Math.min(W,H-46)/2-24;
+      const r0=R*0.42, r1=R*0.62, r2=R*0.62, r3=R;
+      const byGroup={}; leaves.forEach(l=>{ (byGroup[l.group]=byGroup[l.group]||[]).push(l); });
+      let a=-Math.PI/2;
+      const svg=['<svg width="'+W+'" height="'+H+'">'];
+      for(const [g,ls] of Object.entries(byGroup)){
+        const gv=ls.reduce((s,l)=>s+Math.max(0,l.mtd_usd),0); if(gv<=0) continue;
+        const ga=2*Math.PI*gv/total, gend=a+ga, col=gcolor[g]||'#2dd4bf';
+        svg.push(`<path d="${arc(cx,cy,r0,r1,a,gend)}" fill="${hexA(col,0.85)}" stroke="${'#08090b'}" stroke-width="1.5"/>`);
+        if(ga>0.18) svg.push(label(cx,cy,(r0+r1)/2,(a+gend)/2,g,'#04201d',10,true));
+        let pa=a;
+        ls.sort((x,y)=>y.mtd_usd-x.mtd_usd).forEach(l=>{ const lv=Math.max(0,l.mtd_usd); if(lv<=0) return;
+          const la=2*Math.PI*lv/total, lend=pa+la, lc=l.budget_pressure?'#f87171':col;
+          svg.push(`<path d="${arc(cx,cy,r2+2,r3,pa,lend)}" fill="${hexA(lc,0.5)}" stroke="#08090b" stroke-width="1.5"/>`);
+          if(la>0.16) svg.push(label(cx,cy,(r2+r3)/2,(pa+lend)/2,nameOf(l.key),'#e8ebf1',10));
+          pa=lend; });
+        a=gend;
+      }
+      svg.push(`<text x="${cx}" y="${cy-4}" text-anchor="middle" fill="var(--fg)" font-size="22" font-weight="700" class="num">${money(total)}</text>`);
+      svg.push(`<text x="${cx}" y="${cy+14}" text-anchor="middle" fill="var(--muted)" font-size="10" letter-spacing="2">MTD SPEND</text>`);
+      svg.push('</svg>');
+      c.insertAdjacentHTML('beforeend', svg.join(''));
+    }
+    function arc(cx,cy,r0,r1,a0,a1){
+      const P=(r,a)=>[cx+r*Math.cos(a),cy+r*Math.sin(a)], large=(a1-a0)>Math.PI?1:0;
+      const [x0,y0]=P(r1,a0),[x1,y1]=P(r1,a1),[x2,y2]=P(r0,a1),[x3,y3]=P(r0,a0);
+      return `M${x0} ${y0} A${r1} ${r1} 0 ${large} 1 ${x1} ${y1} L${x2} ${y2} A${r0} ${r0} 0 ${large} 0 ${x3} ${y3} Z`;
+    }
+    function label(cx,cy,r,a,txt,fill,size,up){
+      const x=cx+r*Math.cos(a), y=cy+r*Math.sin(a);
+      return `<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="middle" fill="${fill}" font-size="${size}" font-weight="${up?700:500}">${esc(String(txt).slice(0,14))}</text>`;
+    }
+    function hexA(hex,a){ const h=hex.replace('#',''); const n=parseInt(h.length===3?h.split('').map(x=>x+x).join(''):h,16);
+      return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`; }
+
+    // chat (uses systemwide key on the server; no key pasting needed)
+    const chatState = { msgs: [] };
+    function renderChat(){
+      const c = document.getElementById('chat'); if(!c) return;
+      const chips = ["Which group spends the most this month?","What's the EOM forecast and is anyone over budget?",
+        "Show top movers vs last month.","What's untagged right now?"];
+      c.innerHTML = `<div class="sect" style="border-bottom:1px solid var(--line)"><div class="lbl">Chat</div>
+        <div class="sub">grounded in the rollup · routed through Asgard's gateway</div></div>
+        <div class="chatlog" id="chatlog"></div>
+        <div class="chatbar"><input id="qaq" placeholder="Ask about spend…" /><button class="act" id="qago">Ask</button></div>`;
+      const log = document.getElementById('chatlog');
+      if(!chatState.msgs.length){
+        log.innerHTML = `<div class="muted" style="font-size:13px">Ask me anything about your spend. I have tools for project_spend, org_spend, top_movers, untagged, and forecast.</div>`
+          + chips.map(q=>`<button class="chip-q" data-q="${esc(q)}">${esc(q)}</button>`).join('');
+        log.querySelectorAll('.chip-q').forEach(b=>b.onclick=()=>ask(b.dataset.q));
+      } else { paintChat(); }
+      document.getElementById('qago').onclick = ()=>{ const q=document.getElementById('qaq').value.trim(); if(q) ask(q); };
+      document.getElementById('qaq').onkeydown = (e)=>{ if(e.key==='Enter'){ const q=e.target.value.trim(); if(q) ask(q); } };
+    }
+    function paintChat(){
+      const log=document.getElementById('chatlog'); log.innerHTML='';
+      chatState.msgs.forEach(m=>log.appendChild(el(`<div class="msg ${m.role}">${esc(m.text)}</div>`)));
+      log.scrollTop = log.scrollHeight;
+    }
+    async function ask(q){
+      document.getElementById('qaq').value='';
+      chatState.msgs.push({role:'user',text:q}); chatState.msgs.push({role:'bot',text:'…'}); paintChat();
+      try {
+        const r = await api('/api/cost/ask', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({question:q})});
+        chatState.msgs[chatState.msgs.length-1].text = r.answer || '(no answer)';
+      } catch(e){ chatState.msgs[chatState.msgs.length-1].text = 'error: '+e.message; }
+      paintChat();
+    }
+
+    // ---------- other tabs ----------
+    const CATIC = { storage:'▤', compute:'▣', database:'▦', networking:'◈', identity:'⚷', tooling:'⚙', llm:'✦' };
+    const KNOWN_CONNECTORS = ['terraform','exec','http','mcp','stub'];
+
+    async function renderCatalog() {
+      const v = document.getElementById('view');
+      v.innerHTML = `<h1 class="pagehead">Catalog</h1>
+        <p class="pagesub">Everything your agents can provision — services and the connectors behind them. Each is governed: cost-attributed, classification-gated, and audited.</p>
+        <div class="row" style="margin-bottom:4px"><input id="q" placeholder="filter by name, category, tag…" style="flex:1;max-width:360px" /></div>
+        <div id="results">${loading('Loading services…')}</div>`;
+      let all = [];
+      try { all = await api('/api/services'); }
+      catch (e) { document.getElementById('results').innerHTML = errBanner(e); return; }
+      const card = (s) => {
+        const conn = s.provisioner && s.provisioner.connector;
+        const connLabel = KNOWN_CONNECTORS.includes(conn) ? conn : 'custom';
+        const cost = Number((s.cost && s.cost.estimated_monthly_usd) || 0);
+        const range = [s.classification_min, s.classification_max].filter(Boolean).join(' → ');
+        return `<div class="pcard">
+          <div class="ph">
+            <div class="row" style="gap:9px;flex-wrap:nowrap">
+              <span class="catic">${CATIC[s.category]||'◇'}</span>
+              <div><div class="pn">${esc(s.name)}</div><div class="pid">${esc(s.id)}</div></div>
+            </div>
+            <div>${s.auto_approvable?pill('self-serve','teal'):pill('review','amber')}</div>
+          </div>
+          <div class="meta">${pill(s.category,'blue')} ${pill(connLabel, connLabel==='custom'?'purple':'')}
+            ${range?`<span class="muted" style="font-size:12px">${esc(range)}</span>`:''}</div>
+          <p class="muted" style="font-size:12px;margin:8px 0 0;line-height:1.5">${esc((s.description||'').slice(0,160))}</p>
+          <div class="cap num" style="margin-top:10px">${cost>0?'~'+money(cost)+'/mo':'no usage cost'}</div>
+        </div>`;
+      };
+      const render = (list) => {
+        const out = document.getElementById('results');
+        if (!list.length) { out.innerHTML = empty('No services match.'); return; }
+        const cats = {};
+        list.forEach(s => (cats[s.category] = cats[s.category] || []).push(s));
+        out.innerHTML = Object.keys(cats).sort().map(cat =>
+          `<h3 style="margin:18px 0 8px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">${esc(cat)} · ${cats[cat].length}</h3>
+           <div class="grid2">${cats[cat].map(card).join('')}</div>`).join('');
+      };
+      const apply = () => {
+        const q = document.getElementById('q').value.trim().toLowerCase();
+        render(!q ? all : all.filter(s =>
+          (s.id+' '+s.name+' '+s.category+' '+((s.tags||[]).join(' '))+' '+(s.description||'')).toLowerCase().includes(q)));
+      };
+      document.getElementById('q').oninput = apply;
+      apply();
+    }
+
+    async function renderProjects() {
+      const v = document.getElementById('view');
+      let groups = { open: true, groups: [] };
+      let pol = { require_manager: true, require_group: true };
+      try { groups = await api('/api/groups'); } catch {}
+      try { pol = (await api('/api/auth/config')).registration || pol; } catch {}
+      const groupReq = pol.require_group;
+      const groupOpts = groups.open
+        ? `<input id="group" placeholder="${groupReq ? 'group / cost-center' : 'group (optional)'}" />`
+        : `<select id="group">${groupReq ? '' : '<option value="">— ungrouped —</option>'}${groups.groups.map(g=>`<option value="${esc(g.key)}">${esc(g.display_name||g.key)} (${esc(g.cost_center)})</option>`).join('')}</select>`;
+      const managerPh = pol.require_manager ? 'manager email' : 'manager email (defaults to owner)';
+      v.innerHTML = `<h1 class="pagehead">Projects</h1>
+      <p class="pagesub">Registration is the gate — a project must be registered and active before it can mint a gateway key or request resources.</p>
+      <div id="p-root">${loading('Loading projects…')}</div>`;
+      const root = () => document.getElementById('p-root');
+      const enc = encodeURIComponent;
+
+      function cardHtml(p) {
+        const cap = Number(p.budget_usd||0), spent = Number(p.spent_usd||0);
+        const pct = cap>0 ? Math.min(100, spent/cap*100) : 0;
+        const hot = cap>0 && spent/cap >= 0.9;
+        return `<div class="pcard lcard" data-id="${esc(p.project_id)}">
+          <div class="ph">
+            <div><div class="pn">${esc(p.name)}</div><div class="pid">${esc(p.project_id)}</div></div>
+            <div style="text-align:right">${pill(p.lifecycle)}${p.killed?' '+pill('suspended','red'):''}</div>
+          </div>
+          <div class="meta">${pill(p.classification)} ${pill(p.group,'blue')}
+            <span class="muted" style="font-size:12px">${esc(p.cost_center)}</span></div>
+          <div class="row" style="justify-content:space-between">
+            <div class="muted" style="font-size:12px">${esc(p.owner)}</div>
+            ${spark(seriesCache[p.project_id], hot?'var(--red)':'var(--teal)')}
+          </div>
+          <div class="pr" style="margin:10px 0 0">
+            <div class="track"><div class="fill ${hot?'hot':''}" style="width:${Math.max(2,pct)}%"></div></div>
+            <div class="cap num">${money(spent)} / ${cap>0?money(cap):'no cap'}</div>
+          </div>
+          <div class="foot">
+            <span class="muted num" style="font-size:12px">${cap>0?pct.toFixed(0)+'% of budget':'unbudgeted'}</span>
+          </div></div>`;
+      }
+
+      async function showList() {
+        root().innerHTML = `<div class="card">
+          <h3>Register a project</h3>
+          <div class="row">
+            <input id="name" placeholder="project name" />
+            <input id="owner" placeholder="owner email" />
+            <input id="manager" placeholder="${managerPh}" />
+            ${groupOpts}
+            <select id="classification">${['poc','light-operational','wide-operational','critical-path'].map(c=>`<option>${c}</option>`).join('')}</select>
+            <input id="budget" type="number" min="0" step="1" placeholder="budget USD" style="width:130px" />
+            <button class="act" id="reg">Register</button>
+          </div>
+          <div id="regout" class="muted" style="margin-top:8px"></div>
+        </div>
+        <div id="list">${loading('Loading projects…')}</div>`;
+        document.getElementById('reg').onclick = async () => {
+          const body = {
+            name: document.getElementById('name').value.trim(),
+            owner_email: document.getElementById('owner').value.trim(),
+            manager_email: document.getElementById('manager').value.trim(),
+            group: document.getElementById('group').value.trim(),
+            classification: document.getElementById('classification').value,
+            budget_usd: Number(document.getElementById('budget').value || 0),
+          };
+          try {
+            const r = await api('/api/projects', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(body)});
+            document.getElementById('regout').innerHTML = `<p class="ok">registered <code>${esc(r.project_id)}</code></p>`;
+            fillList();
+          } catch (e) { document.getElementById('regout').innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+        };
+        fillList();
+      }
+
+      async function fillList() {
+        const out = document.getElementById('list');
+        if (!out) return;
+        try {
+          const ps = await api('/api/projects');
+          if (!ps.length) { out.innerHTML = empty('No projects registered yet.'); return; }
+          await loadSeries(ps.map(p=>p.project_id));
+          out.innerHTML = `<div class="grid2">${ps.map(cardHtml).join('')}</div>`;
+          out.querySelectorAll('.lcard').forEach(c => c.onclick = () => showDetail(c.dataset.id));
+        } catch (e) { out.innerHTML = errBanner(e); }
+      }
+
+      const resourceTable = (resources) => {
+        if (!resources.length) return empty('No resources provisioned.');
+        return `<div class="tablewrap"><table><thead><tr>
+          <th>type</th><th>name</th><th>state</th><th class="r">est/mo</th>
+          </tr></thead><tbody>${resources.map(r => `<tr>
+            <td>${pill(r.rtype,'blue')}</td>
+            <td>${esc(r.name)}</td>
+            <td>${pill(r.state)}</td>
+            <td class="r num">${money(r.est_monthly_usd)}</td></tr>`).join('')}</tbody></table></div>`;
+      };
+
+      async function showDetail(id) {
+        root().innerHTML = loading('Loading project…');
+        let p, resources = [], checklist = null;
+        try { [p, resources, checklist] = await Promise.all([api(`/api/projects/${enc(id)}`), api(`/api/projects/${enc(id)}/resources`), api(`/api/projects/${enc(id)}/promotion`).catch(() => null)]); }
+        catch (e) { root().innerHTML = errBanner(e); return; }
+        const cap = Number(p.budget_usd||0), spent = Number(p.spent_usd||0);
+        const decommissioned = p.lifecycle === 'decommissioned';
+        const actions = decommissioned
+          ? `<span class="muted" style="font-size:13px">This project has been decommissioned — its resources were torn down and it is retired.</span>`
+          : `<button class="danger pbtn" data-kind="${p.killed?'unkill':'kill'}">${p.killed?'Un-kill':'Kill'}</button>
+             <button class="danger pbtn" data-kind="decommission" style="background:var(--red);color:#fff">Decommission</button>`;
+        root().innerHTML = `<button class="crumb">← all projects</button>
+          <div class="row" style="justify-content:space-between;align-items:flex-start">
+            <div><h2 style="margin:0 0 4px">${esc(p.name)}</h2>
+              <div class="muted" style="font-size:11px"><code>${esc(p.project_id)}</code></div></div>
+            <div style="text-align:right">${pill(p.lifecycle)}${p.killed?' '+pill('suspended','red'):''}</div>
+          </div>
+          <div class="meta" style="margin:10px 0">${pill(p.classification)} ${pill(p.group,'blue')}
+            <span class="muted" style="font-size:12px">${esc(p.cost_center)}</span></div>
+          <div class="card" style="margin-top:12px">
+            <div class="row" style="gap:24px;flex-wrap:wrap">
+              <div><div class="muted" style="font-size:11px">owner</div>${esc(p.owner)}</div>
+              <div><div class="muted" style="font-size:11px">manager</div>${esc(p.manager)}</div>
+              <div><div class="muted" style="font-size:11px">spend / budget</div><span class="num">${money(spent)} / ${cap>0?money(cap):'no cap'}</span></div>
+            </div>
+          </div>
+          <div class="row" style="justify-content:space-between;align-items:center;margin:18px 0 8px">
+            <h3 style="margin:0">Governance evidence</h3>
+            ${decommissioned ? '' : `<button class="act" id="ev-edit">Edit evidence</button>`}
+          </div>
+          <div id="p-evidence">${evidenceView(p)}</div>
+          <div class="row" style="justify-content:space-between;align-items:center;margin:18px 0 8px">
+            <h3 style="margin:0">Classification lifecycle</h3>
+          </div>
+          ${reviewCard(p, decommissioned)}
+          ${promotionCard(checklist, decommissioned)}
+          ${decommissioned ? '' : demoteControl(p)}
+          <h3 style="margin:18px 0 8px">Resources</h3>
+          <p class="muted" style="font-size:12px;margin:0 0 10px">Kill suspends billable resources to stop charges (reversible); decommission destroys them, including data (irreversible). Only <code>provisioned</code> resources accrue cost.</p>
+          <div id="p-res">${resourceTable(resources)}</div>
+          <h3 style="margin:18px 0 8px">Lifecycle</h3>
+          <div class="row">${actions}</div>`;
+        root().querySelector('.crumb').onclick = () => showList();
+        root().querySelectorAll('.pbtn').forEach(b => b.onclick = () => doAction(id, b.dataset.kind));
+        const evEdit = root().querySelector('#ev-edit');
+        if (evEdit) evEdit.onclick = () => {
+          document.getElementById('p-evidence').innerHTML = evidenceForm(p);
+          evEdit.disabled = true;
+          document.getElementById('ev-cancel').onclick = () => { document.getElementById('p-evidence').innerHTML = evidenceView(p); evEdit.disabled = false; };
+          document.getElementById('ev-save').onclick = async () => {
+            const body = {};
+            document.querySelectorAll('#p-evidence [data-ev]').forEach(elm => {
+              const f = EVIDENCE_FIELDS.find(x => x.k === elm.dataset.ev);
+              body[elm.dataset.ev] = f.list ? elm.value.split(',').map(s => s.trim()).filter(Boolean) : elm.value.trim();
+            });
+            const out = document.getElementById('ev-out');
+            out.innerHTML = '';
+            try { await api(`/api/projects/${enc(id)}`, {method:'PATCH', headers:{'content-type':'application/json'}, body:JSON.stringify(body)}); showDetail(id); }
+            catch (e) { out.innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+          };
+        };
+        const promoteBtn = root().querySelector('#promote-btn');
+        if (promoteBtn && checklist && checklist.next_tier) promoteBtn.onclick = async () => {
+          const out = document.getElementById('promote-out'); out.innerHTML = '';
+          promoteBtn.disabled = true;
+          try {
+            const req = await api(`/api/projects/${enc(id)}/promotion`, {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({target:checklist.next_tier})});
+            if (req.state === 'approved') {
+              // Auto-approved (clean Light) — fulfil it so the tier actually moves.
+              await api(`/api/requests/${enc(req.id)}/fulfill`, {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({actor:'user:default/ui'})});
+              out.innerHTML = `<span class="ok">Promoted to ${esc(checklist.next_tier)}.</span>`;
+            } else {
+              out.innerHTML = `<span class="muted" style="font-size:13px">Submitted for review (request <code>${esc(req.id)}</code>${req.approver?`, approver ${esc(req.approver)}`:''}).</span>`;
+            }
+            setTimeout(() => showDetail(id), 900);
+          } catch (e) { out.innerHTML = `<span class="err">${esc(e.message)}</span>`; promoteBtn.disabled = false; }
+        };
+        const demoteBtn = root().querySelector('#demote-btn');
+        if (demoteBtn) demoteBtn.onclick = async () => {
+          const out = document.getElementById('demote-out'); out.innerHTML = '';
+          const target = document.getElementById('demote-target').value;
+          const reason = document.getElementById('demote-reason').value.trim();
+          if (!reason) { out.innerHTML = `<span class="err">A reason is required.</span>`; return; }
+          demoteBtn.disabled = true;
+          try { await api(`/api/projects/${enc(id)}/demote`, {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({target, reason})}); showDetail(id); }
+          catch (e) { out.innerHTML = `<span class="err">${esc(e.message)}</span>`; demoteBtn.disabled = false; }
+        };
+        const extendBtn = root().querySelector('#extend-btn');
+        if (extendBtn) extendBtn.onclick = async () => {
+          const out = document.getElementById('extend-out'); out.innerHTML = '';
+          extendBtn.disabled = true;
+          try {
+            const r = await api(`/api/projects/${enc(id)}/extend`, {method:'POST'});
+            if (r.outcome === 'extended') { showDetail(id); }
+            else { out.innerHTML = `<span class="muted" style="font-size:13px">Automatic extensions used up — submitted for review (request <code>${esc(r.request.id)}</code>).</span>`; setTimeout(() => showDetail(id), 1200); }
+          } catch (e) { out.innerHTML = `<span class="err">${esc(e.message)}</span>`; extendBtn.disabled = false; }
+        };
+      }
+
+      async function doAction(id, kind) {
+        const opts = {
+          kill: { title:'Kill this project?', message:'Disables the project key immediately and suspends its billable resources (compute stops; storage remains). Reversible via un-kill.', confirmLabel:'Kill project' },
+          unkill: { title:'Un-kill this project?', message:'Re-enables the project key and resumes its suspended resources.', confirmLabel:'Un-kill project' },
+          decommission: { title:'Decommission this project?', message:'Permanently destroys every provisioned resource including data (images, volumes, databases) and retires the project. This cannot be undone.', confirmLabel:'Decommission' },
+        }[kind];
+        if (!await confirmAction(opts)) return;
+        // Each lifecycle transition commits before/after its connector call, so poll
+        // the resource list while the (synchronous) action runs to show live state.
+        let polling = true;
+        const tick = async () => {
+          if (!polling) return;
+          try { const rs = await api(`/api/projects/${enc(id)}/resources`); const slot = document.getElementById('p-res'); if (slot) slot.innerHTML = resourceTable(rs); } catch {}
+          if (polling) setTimeout(tick, 2000);
+        };
+        setTimeout(tick, 600);
+        const req = kind === 'decommission'
+          ? api(`/api/projects/${enc(id)}/decommission`, {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({reason:'decommissioned via ui'})})
+          : api(`/api/projects/${enc(id)}/${kind}`, {method:'POST'});
+        try { await req; } catch (e) { polling = false; alert(e.message); return; }
+        polling = false;
+        delete seriesCache[id];
+        showDetail(id);
+      }
+
+      showList();
+      if (focusProject) { const id = focusProject; focusProject = null; showDetail(id); }
+    }
+
+    // ---------- Governance (portfolio metrics, WS4) ----------
+    function govValue(m) {
+      if (!m.measurable) return m.value == null ? 'n/a' : '—';
+      if (m.unit === 'days') return Number(m.value).toFixed(1) + 'd';
+      return String(Math.round(m.value));
+    }
+    function govStatus(m) {
+      if (!m.measurable) return { cls: '', txt: 'no data source yet' };
+      const v = Number(m.value || 0);
+      if (m.unit === 'days') return { cls: 'teal', txt: 'tracked' };
+      if (m.target === '0') return v === 0 ? { cls: 'green', txt: 'on target' } : { cls: 'red', txt: 'off target' };
+      return v > 0 ? { cls: 'amber', txt: 'watch' } : { cls: 'green', txt: 'clear' };
+    }
+
+    async function renderGovernanceDash() {
+      const v = document.getElementById('view');
+      v.innerHTML = `<h1 class="pagehead">Governance</h1>
+        <p class="pagesub">Portfolio health against the operating model's metrics, scoped to what you can see. Counts with no backing data source are labelled, never reported as zero.</p>
+        <div id="g-root">${loading('Computing metrics…')}</div>`;
+      const root = () => document.getElementById('g-root');
+      let m;
+      try { m = await api('/api/governance/metrics'); }
+      catch (e) { root().innerHTML = errBanner(e); return; }
+
+      const cards = m.metrics.map((x, i) => {
+        const st = govStatus(x);
+        const offenders = (x.offenders || []);
+        const drill = offenders.length
+          ? `<details class="g-drill"><summary>${offenders.length} project${offenders.length>1?'s':''}</summary>
+               <div class="g-offenders">${offenders.map(id => `<button class="pill blue g-link" data-id="${esc(id)}">${esc(id)}</button>`).join('')}</div>
+             </details>`
+          : '';
+        return `<div class="card" style="display:flex;flex-direction:column;gap:8px">
+          <div class="muted" style="font-size:12px;line-height:1.3">${esc(x.label)}</div>
+          <div class="row" style="align-items:baseline;gap:10px">
+            <span class="big num" style="font-size:30px;font-weight:600;color:${x.measurable?'var(--fg)':'var(--muted)'}">${govValue(x)}</span>
+            ${pill('target ' + x.target, st.cls)}
+          </div>
+          <div>${pill(st.txt, st.cls)}</div>
+          ${x.note ? `<div class="muted" style="font-size:11px;line-height:1.3">${esc(x.note)}</div>` : ''}
+          ${drill}
+        </div>`;
+      }).join('');
+
+      root().innerHTML = `
+        <div class="row" style="gap:18px;margin-bottom:14px;flex-wrap:wrap">
+          <span class="muted" style="font-size:12px">as of <code>${esc((m.as_of||'').slice(0,10))}</code></span>
+          <span class="muted" style="font-size:12px"><strong class="num">${m.total_projects}</strong> projects</span>
+          <span class="muted" style="font-size:12px"><strong class="num">${m.operational_projects}</strong> operational</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px">${cards}</div>`;
+
+      root().querySelectorAll('.g-link').forEach(b => b.onclick = () => { focusProject = b.dataset.id; go('projects'); });
+    }
+
+    async function renderCost() {
+      const v = document.getElementById('view');
+      const dims = ['project','owner','manager','group','classification','model','provider'];
+      v.innerHTML = `<h1 class="pagehead">Cost report</h1>
+        <p class="pagesub">Attributed spend rolled up by any dimension.</p>
+        <div class="row" style="margin-bottom:16px"><span class="muted">spend by</span>
+        <select id="by">${dims.map(d=>`<option>${d}</option>`).join('')}</select>
+        <button class="act" id="go">Report</button></div>
+        <div id="rep">${loading('Building report…')}</div>`;
+      const run = async () => {
+        const out = document.getElementById('rep');
+        out.innerHTML = loading('Building report…');
+        const by = document.getElementById('by').value;
+        try {
+          const rep = await api('/api/cost?by=' + encodeURIComponent(by));
+          if (!rep.rows.length) { out.innerHTML = empty('No spend recorded yet.'); return; }
+          const idLike = ['project','model'].includes(by);
+          const rows = rep.rows.map(r => `<tr>
+            <td>${idLike?`<code>${esc(r.key)}</code>`:esc(r.key)}</td>
+            <td class="r num">${usd4(r.total_usd)}</td>
+            <td class="r num">${Number(r.pct_of_total).toFixed(1)}%</td>
+            <td class="r num muted">${Number(r.tokens).toLocaleString()}</td>
+            <td class="r num muted">${Number(r.events).toLocaleString()}</td></tr>`).join('');
+          out.innerHTML = `<p class="muted" style="margin-top:0">total <strong class="num">${usd4(rep.total_usd)}</strong> across ${rep.rows.length} ${esc(by)}(s)</p>
+            <div class="tablewrap"><table><thead><tr>
+            <th>${esc(by)}</th><th class="r">spend</th><th class="r">% of total</th><th class="r">tokens</th><th class="r">events</th>
+            </tr></thead><tbody>${rows}</tbody></table></div>`;
+        } catch (e) { out.innerHTML = errBanner(e); }
+      };
+      document.getElementById('go').onclick = run; run();
+    }
+
+    async function renderAudit() {
+      const v = document.getElementById('view');
+      v.innerHTML = `<h1 class="pagehead">Audit</h1>
+        <p class="pagesub">Append-only record of every governed action.</p>
+        <div class="row" style="margin-bottom:16px">
+        <input id="trace" placeholder="trace id (optional)" style="min-width:260px"/>
+        <input id="ent" placeholder="entity ref (optional)" style="min-width:240px"/>
+        <button class="act" id="go">Query</button></div>
+        <div id="rows">${loading('Loading audit log…')}</div>`;
+      const run = async () => {
+        const out = document.getElementById('rows');
+        out.innerHTML = loading('Loading audit log…');
+        const params = new URLSearchParams();
+        const tr = document.getElementById('trace').value.trim(); if (tr) params.set('trace', tr);
+        const en = document.getElementById('ent').value.trim(); if (en) params.set('entity', en);
+        try {
+          const audits = await api('/api/audit?' + params);
+          if (!audits.length) { out.innerHTML = empty('No audit entries match.'); return; }
+          const rows = audits.map(a => `<tr>
+            <td class="muted num" style="white-space:nowrap">${esc(a.ts)}</td>
+            <td><code>${esc(a.actor)}</code></td>
+            <td><code>${esc(a.action)}</code></td>
+            <td>${pill(a.outcome)}</td>
+            <td class="muted">${a.entity_ref?`<code>${esc(a.entity_ref)}</code>`:''}</td>
+            <td class="muted">${a.trace_id?`<code>${esc(a.trace_id)}</code>`:''}</td></tr>`).join('');
+          out.innerHTML = `<div class="tablewrap"><table><thead><tr>
+            <th>time</th><th>actor</th><th>action</th><th>outcome</th><th>entity</th><th>trace</th>
+            </tr></thead><tbody>${rows}</tbody></table></div>`;
+        } catch (e) { out.innerHTML = errBanner(e); }
+      };
+      document.getElementById('go').onclick = run; run();
+    }
+
+    function renderAbout() {
+      document.getElementById('view').innerHTML = `<h1 class="pagehead">About</h1>
+      <p class="pagesub">An open-source governance control plane for AI &amp; agent development.</p>
+      <div class="card">
+        <p style="margin-top:0">Asgard pairs a governed catalog with a model gateway — budgets, policy, guardrails, kill switch, and audit — alongside evals as PR gates, a request→approval workflow, and an isolated runtime.</p>
+        <p class="muted" style="margin-bottom:0">Ships as a single embedded binary. REST at <code>/api/*</code>, GraphQL at <code>/graphql</code>, and MCP at <code>/mcp</code> (Streamable HTTP) plus stdio.</p>
+      </div>
+      <div class="grid2">
+        <div class="pcard"><div class="pn">Catalog</div><p class="muted" style="font-size:13px;margin-bottom:0">Discoverable entities with lifecycle and ownership.</p></div>
+        <div class="pcard"><div class="pn">Gateway</div><p class="muted" style="font-size:13px;margin-bottom:0">Budget-aware model access with per-project virtual keys.</p></div>
+        <div class="pcard"><div class="pn">Cost</div><p class="muted" style="font-size:13px;margin-bottom:0">Rollups, forecasts, anomalies, and attribution.</p></div>
+        <div class="pcard"><div class="pn">Audit</div><p class="muted" style="font-size:13px;margin-bottom:0">Append-only trail of every governed action.</p></div>
+      </div>`;
+    }
+
+    // ---------- Auth gate (local users + optional SSO) ----------
+    async function showLogin() {
+      let cfg = { local: true, oidc: false };
+      try { cfg = await api('/api/auth/config'); } catch {}
+      document.getElementById('nav').innerHTML = '';
+      document.getElementById('aside').style.display = 'none';
+      document.getElementById('view').className = 'wrap';
+      const sso = cfg.oidc
+        ? `<button class="act" id="sso" style="margin-top:10px;width:100%">Sign in with SSO</button>`
+        : '';
+      document.getElementById('view').innerHTML = `<div class="card" style="max-width:340px;margin:96px auto">
+        <div class="row" style="gap:10px;margin-bottom:14px"><span class="logo">A</span><span class="brand">Asgard</span></div>
+        <form id="loginf">
+          <input id="u" placeholder="username" autocomplete="username" style="width:100%;margin:6px 0" />
+          <input id="p" type="password" placeholder="password" autocomplete="current-password" style="width:100%;margin:6px 0" />
+          <button class="act" type="submit" style="width:100%;margin-top:6px">Sign in</button>
+        </form>
+        ${sso}
+        <p class="err" id="loginerr" style="min-height:1em;margin-bottom:0"></p>
+      </div>`;
+      if (cfg.oidc) document.getElementById('sso').onclick = () => { location.href = '/api/auth/oidc/login'; };
+      document.getElementById('loginf').onsubmit = async (e) => {
+        e.preventDefault();
+        try {
+          await api('/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ username: document.getElementById('u').value, password: document.getElementById('p').value }) });
+          boot();
+        } catch (err) { document.getElementById('loginerr').textContent = (err && err.message) || 'sign-in failed'; }
+      };
+    }
+
+    // boot: require a session, then preload per-project series so sparklines
+    // render on first paint. Falls back to the sign-in view when unauthenticated.
+    async function boot() {
+      let me;
+      try { me = await api('/api/auth/me'); }
+      catch { return showLogin(); }
+      currentRole = (me && me.role) || 'member';
+      active = 'start';
+      document.getElementById('aside').style.display = '';
+      const avatar = document.getElementById('avatar');
+      if (avatar) {
+        const who = (me && (me.display_name || me.username)) || 'U';
+        avatar.textContent = who[0].toUpperCase();
+        avatar.style.cursor = 'pointer'; avatar.title = `${who} · ${currentRole} — sign out`;
+        avatar.onclick = async () => { try { await api('/api/auth/logout', { method: 'POST' }); } catch {} boot(); };
+      }
+      renderNav();
+      try { const projects = await api('/api/projects'); await loadSeries(projects.map(p=>p.project_id)); } catch {}
+      document.getElementById('view').className = tabs[active].full ? 'full' : 'wrap';
+      tabs[active].render();
+    }
+    applyTheme((() => { try { return localStorage.getItem('asgard-theme') || 'dark'; } catch { return 'dark'; } })());
+    const _tb = document.getElementById('themebtn');
+    if (_tb) { _tb.textContent = theme() === 'light' ? '☀' : '☾'; _tb.onclick = toggleTheme; }
+    boot();
+  </script>
+</body>
+</html>

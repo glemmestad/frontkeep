@@ -1,0 +1,23 @@
+id: litellm
+name: LiteLLM
+category: llm
+status: live
+description: >-
+  LiteLLM proxy as the unified inference backend (100+ providers, fallbacks,
+  routing). A standard enableable module — you do NOT author this, you enable it by
+  pointing LITELLM_BASE_URL at your proxy. Once enabled it becomes the inference
+  upstream and can be the default backend for project tokens. Deploy LiteLLM
+  alongside Asgard (e.g. the Helm sidecar); Asgard governs, LiteLLM routes.
+provisioner:
+  connector: stub
+cost:
+  model: usage
+  source:
+    type: gateway
+inference:
+  kind: openai-compatible
+  base_url_env: LITELLM_BASE_URL
+  api_key_env: LITELLM_MASTER_KEY
+  models:
+    - { ref: model:litellm/router, route: gpt-5.1, data_classes: [public, internal, confidential], cost_in: 0.00125, cost_out: 0.01 }
+tags: [llm, inference, litellm, router]

@@ -1,0 +1,285 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://asgard.dev/schemas/project.schema.json",
+  "title": "Asgard Project",
+  "description": "Canonical schema for an Asgard Project entity manifest. A Project groups related work, owns a budget, and is tracked through a lifecycle.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "asgard.dev/v1",
+      "description": "Asgard API version for this manifest."
+    },
+    "kind": {
+      "const": "Project",
+      "description": "Entity kind discriminator."
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "description": "Identifying and descriptive information common to all Asgard entities.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique entity name within its namespace."
+        },
+        "namespace": {
+          "type": "string",
+          "default": "default",
+          "description": "Namespace the entity belongs to."
+        },
+        "title": {
+          "type": "string",
+          "description": "Human-friendly display title."
+        },
+        "description": {
+          "type": "string",
+          "description": "Longer prose description of the entity."
+        },
+        "labels": {
+          "type": "object",
+          "description": "Key/value labels used for selection and grouping.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "annotations": {
+          "type": "object",
+          "description": "Key/value annotations carrying non-identifying metadata.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "tags": {
+          "type": "array",
+          "description": "Free-form tags for discovery.",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "owner"
+      ],
+      "description": "Project-specific configuration.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^proj-[0-9]{4}-[0-9]{4}$",
+          "description": "Stable project identifier, e.g. proj-2024-0193."
+        },
+        "owner": {
+          "type": "string",
+          "anyOf": [
+            { "pattern": "^[a-z][a-z0-9-]*:[a-z0-9][a-z0-9-]*\\/[a-z0-9][a-z0-9._-]*$" },
+            { "format": "email", "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$" }
+          ],
+          "description": "Owner as an EntityRef (group:default/platform) or a self-entered email (unverified)."
+        },
+        "manager": {
+          "type": "string",
+          "anyOf": [
+            { "pattern": "^[a-z][a-z0-9-]*:[a-z0-9][a-z0-9-]*\\/[a-z0-9][a-z0-9._-]*$" },
+            { "format": "email", "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$" }
+          ],
+          "description": "Responsible manager as an EntityRef or a self-entered email (unverified)."
+        },
+        "group": {
+          "type": "string",
+          "description": "Cost-center / reporting group the project rolls up to (from the operator allowlist)."
+        },
+        "costCenter": {
+          "type": "string",
+          "description": "Finance cost-center code spend is attributed to (derived from the group)."
+        },
+        "classification": {
+          "type": "string",
+          "enum": [
+            "poc",
+            "light-operational",
+            "wide-operational",
+            "critical-path"
+          ],
+          "description": "Operational importance of the project."
+        },
+        "budgetUsd": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Allocated budget in US dollars."
+        },
+        "lifecycle": {
+          "type": "string",
+          "enum": [
+            "active",
+            "decommissioned",
+            "archived"
+          ],
+          "default": "active",
+          "description": "Current lifecycle stage of the project."
+        },
+        "requested_classification": {
+          "type": "string",
+          "description": "Classification tier the project is requesting to move to (one step up); used by the promotion flow."
+        },
+        "repo_or_source_url": {
+          "type": "string",
+          "description": "Source repository or location of record for the system."
+        },
+        "business_owner": {
+          "type": "string",
+          "description": "Accountable business owner (evidence field, not an auth role)."
+        },
+        "technical_owner": {
+          "type": "string",
+          "description": "Accountable technical owner (evidence field, not an auth role)."
+        },
+        "team_or_org_of_record": {
+          "type": "string",
+          "description": "Team or org that owns and operates the system."
+        },
+        "support_contact": {
+          "type": "string",
+          "description": "How to reach support for the system (rotation, channel, or address)."
+        },
+        "runbook_url": {
+          "type": "string",
+          "description": "Operational runbook location."
+        },
+        "monitoring_or_logs_url": {
+          "type": "string",
+          "description": "Monitoring dashboard or log aggregation location."
+        },
+        "ci_status_url": {
+          "type": "string",
+          "description": "CI/build status location."
+        },
+        "critical_flow_test_or_eval_url": {
+          "type": "string",
+          "description": "Test or eval covering the system's critical flow."
+        },
+        "state_loss_posture": {
+          "type": "string",
+          "enum": [
+            "stateless",
+            "recoverable",
+            "durable-critical"
+          ],
+          "description": "What happens to state if the system fails: stateless, recoverable, or durable-critical."
+        },
+        "stack_exception": {
+          "type": "string",
+          "description": "Declared exception for an unsupported stack or data store, with justification."
+        },
+        "security_review_status": {
+          "type": "string",
+          "enum": [
+            "not-started",
+            "requested",
+            "in-review",
+            "approved",
+            "waived"
+          ],
+          "description": "Status of the security review for the system."
+        },
+        "architecture_summary_url": {
+          "type": "string",
+          "description": "Architecture summary or design doc location."
+        },
+        "incident_path": {
+          "type": "string",
+          "description": "How incidents are raised and handled for the system."
+        },
+        "slo_or_service_target": {
+          "type": "string",
+          "description": "Declared SLO or service target."
+        },
+        "rpo_rto": {
+          "type": "string",
+          "description": "Recovery point / recovery time objectives."
+        },
+        "decommission_path": {
+          "type": "string",
+          "description": "How the system is decommissioned at end of life."
+        },
+        "executive_accountable_owner": {
+          "type": "string",
+          "description": "Executive accountable for the system (critical-path tiers)."
+        },
+        "risk_acceptance_url": {
+          "type": "string",
+          "description": "Recorded residual-risk acceptance."
+        },
+        "dr_exercise_evidence_url": {
+          "type": "string",
+          "description": "Evidence of a disaster-recovery exercise."
+        },
+        "audit_retention_requirement": {
+          "type": "string",
+          "description": "Audit/log retention requirement for the system."
+        },
+        "recurring_review_date": {
+          "type": "string",
+          "description": "Next scheduled recurring review date (ISO-8601)."
+        },
+        "maintainers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Named maintainers of the system."
+        },
+        "critical_dependencies": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Systems or services this system critically depends on."
+        },
+        "primary_data_flows": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Primary data flows in and out of the system."
+        }
+      }
+    },
+    "relations": {
+      "type": "array",
+      "description": "Typed relationships from this entity to other entities.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "target"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Relationship type, e.g. dependsOn, partOf."
+          },
+          "target": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*:[a-z0-9][a-z0-9-]*\\/[a-z0-9][a-z0-9._-]*$",
+            "description": "EntityRef of the related entity, e.g. system:default/billing."
+          }
+        }
+      }
+    }
+  }
+}

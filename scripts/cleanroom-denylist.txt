@@ -1,0 +1,38 @@
+# Clean-room denylist — extended-regex patterns (one per line, '#' = comment).
+#
+# Each pattern is OBFUSCATED with a single-character class (e.g. p[s]i...) so
+# that this file contains no literal employer/internal trace and therefore does
+# not trip its own scan. As a regular expression the pattern still matches the
+# real string. The scan (scripts/cleanroom-check.sh) also excludes this file
+# explicitly. Matching is case-insensitive.
+#
+# High-signal traces only. Generic org-group nouns (e.g. team names) are
+# deliberately NOT listed: they are common English words that would cause false
+# positives, and Asgard never hardcodes them — classification/group taxonomies
+# are operator-configured, not baked in.
+
+# Company name (any casing/spacing variant)
+p[s]iquantum
+psi[ ]?quantum
+
+# Internal AWS account id (applications-dev)
+8907[4]2609526
+
+# Predecessor POC codename + its id/prefix conventions and deployment name
+y[g]gdrasil
+y[g]g-20
+d[h]aka
+
+# Internal git host
+gitlab\.p[s]iquantum\.com
+
+# Personal usernames / email local-parts found in the predecessor repo
+\be[g]lemmestad\b
+\bj[h]owell\b
+\bj[r]uiz\b
+
+# Internal email domain
+@p[s]iquantum\.com
+
+# Proprietary application name (the migrated app)
+T[h]eia

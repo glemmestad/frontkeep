@@ -1,0 +1,23 @@
+{
+  "description": "Stand up an HTTPS-reachable MCP server with Auth0 M2M authentication, from Asgard primitives. Composes an ECR repo, an Auth0 M2M app, and a load-balanced HTTPS service. The result is an /mcp URL agents reach with a Bearer token. The agent fills the inputs and issues each request_resource itself.",
+  "inputs": [
+    { "name": "name", "required": true, "description": "kebab-case identifier; resources land at <project>-<name>." },
+    { "name": "image", "required": true, "description": "OCI image for the MCP server; listens on 8080 with /healthz. Use immutable :sha tags." },
+    { "name": "vpc_id", "required": true, "description": "Existing VPC." },
+    { "name": "subnet_ids", "required": true, "description": "Two or more subnets across AZs." },
+    { "name": "certificate_arn", "required": true, "description": "ACM cert for the hostname (HTTPS)." },
+    { "name": "tenant", "required": false, "default": "your-tenant", "description": "Auth0 tenant for the M2M app." },
+    { "name": "cpu", "required": false, "default": "256" },
+    { "name": "memory", "required": false, "default": "512" }
+  ],
+  "steps": [
+    { "id": "repo", "service": "ecr-repository", "description": "Image repository — push :sha tags here.", "inputs": { "name": "${inputs.name}" } },
+    { "id": "auth", "service": "auth0-application", "description": "M2M client agents use to obtain Bearer tokens.", "inputs": { "name": "${inputs.name}", "app_type": "non_interactive" } },
+    { "id": "server", "service": "ecs-service", "description": "The MCP server behind an HTTPS load balancer.", "inputs": {
+      "name": "${inputs.name}", "image": "${inputs.image}", "vpc_id": "${inputs.vpc_id}", "subnet_ids": "${inputs.subnet_ids}",
+      "certificate_arn": "${inputs.certificate_arn}", "container_port": 8080, "health_path": "/healthz", "cpu": "${inputs.cpu}", "memory": "${inputs.memory}",
+      "env": { "AUTH0_CLIENT_ID": "${steps.auth.client_id}", "AUTH0_DOMAIN": "${inputs.tenant}" }
+    } }
+  ],
+  "outputs": { "mcp_url": "${steps.server.url}/mcp" }
+}

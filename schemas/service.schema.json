@@ -1,0 +1,72 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://asgard.dev/schemas/service.schema.json",
+  "title": "Service Manifest",
+  "description": "One service in the manifest-driven catalog: how it is provisioned and how its cost is attributed back to a project.",
+  "type": "object",
+  "required": ["id", "name", "category", "provisioner", "cost"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "name": { "type": "string", "minLength": 1 },
+    "category": {
+      "type": "string",
+      "enum": ["governance", "auth", "storage", "database", "compute", "data", "inference", "agentic", "observability", "tooling"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["planned", "mr-request", "live", "deprecated", "external"]
+    },
+    "classification_min": { "$ref": "#/$defs/classification" },
+    "classification_max": { "$ref": "#/$defs/classification" },
+    "description": { "type": "string" },
+    "auto_approvable": { "type": "boolean" },
+    "required_fields": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "secret_outputs": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "provisioner": {
+      "type": "object",
+      "required": ["connector"],
+      "additionalProperties": false,
+      "properties": {
+        "connector": {
+          "type": "string",
+          "enum": ["terraform", "exec", "http", "mcp", "litellm", "aws-cli", "stub"]
+        },
+        "config": { "type": "object" }
+      }
+    },
+    "cost": {
+      "type": "object",
+      "required": ["model", "source"],
+      "additionalProperties": false,
+      "properties": {
+        "model": { "type": "string", "enum": ["free", "flat", "usage", "pass-through"] },
+        "estimated_monthly_usd": { "type": "number", "minimum": 0 },
+        "source": {
+          "type": "object",
+          "required": ["type"],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["none", "free", "flat", "gateway", "aws-cost-explorer", "gcp-billing", "azure-cost-management", "databricks-billing", "litellm", "exec"]
+            }
+          }
+        }
+      }
+    },
+    "tags": { "type": "array", "items": { "type": "string" } },
+    "documentation": { "type": "string" }
+  },
+  "$defs": {
+    "classification": {
+      "type": "string",
+      "enum": ["poc", "light-operational", "wide-operational", "critical-path"]
+    }
+  }
+}

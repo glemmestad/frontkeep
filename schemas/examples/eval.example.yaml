@@ -1,0 +1,31 @@
+apiVersion: asgard.dev/v1
+kind: Eval
+metadata:
+  name: checkout-recommender-quality
+  namespace: default
+  title: Checkout Recommender Quality Eval
+  description: >-
+    Regression evaluation suite for the checkout product-recommendation model,
+    scoring relevance and ranking quality against a curated golden dataset.
+  labels:
+    domain: recommendations
+    team: ml-platform
+  annotations:
+    asgard.dev/managed-by: data-quality-bot
+  tags:
+    - eval
+    - recommendations
+    - regression
+spec:
+  owner: group:default/ml-platform
+  suite: recommender-golden-v3
+  thresholds:
+    min_pass_rate: 0.95
+    min_avg_score: 0.82
+  gatingTier: critical-path
+  target: component:default/checkout-recommender
+relations:
+  - type: dependsOn
+    target: resource:default/golden-eval-dataset
+  - type: partOf
+    target: system:default/checkout

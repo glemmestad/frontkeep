@@ -1,0 +1,25 @@
+id: alb
+name: Application Load Balancer
+category: networking
+status: live
+classification_min: poc
+classification_max: critical-path
+description: >-
+  A standalone Application Load Balancer for shared or advanced composition,
+  where several services register target groups against one ALB rather than each
+  ecs-service owning its own. Takes an existing VPC; optional HTTPS via an ACM
+  certificate.
+auto_approvable: false
+required_fields: [name, vpc_id, subnet_ids]
+provisioner:
+  connector: terraform
+  config:
+    module: ./modules/aws/alb
+    cloud: aws
+cost:
+  model: usage
+  estimated_monthly_usd: 20.0
+  source:
+    type: aws-cost-explorer
+tags: [networking, aws, alb]
+documentation: services/alb/README.md

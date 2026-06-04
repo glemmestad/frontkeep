@@ -1,0 +1,36 @@
+id: ec2-instance
+name: EC2 Instance
+category: compute
+status: live
+classification_min: poc
+classification_max: critical-path
+description: Compute instance in a private/public subnet.
+auto_approvable: true
+required_fields: [name, instance_type]
+provisioner:
+  connector: terraform
+  config:
+    module: ./modules/aws/ec2-instance
+    cloud: aws
+    # Kill suspends the instance to halt charges by re-applying it stopped; un-kill
+    # re-applies the original spec (running).
+    stop_tfvars:
+      instance_state: stopped
+cost:
+  model: usage
+  estimated_monthly_usd: 10.0
+  source:
+    type: aws-cost-explorer
+# Cost/tier/approval keyed to instance_type: small dev sizes auto-approve on cost,
+# large ones exceed the cap (-> human review), GPU sizes always review and only at
+# wide-operational and above. Unlisted sizes fall through to review.
+variants:
+  field: instance_type
+  options:
+    t3.micro:    { estimated_monthly_usd: 7.0 }
+    t3.small:    { estimated_monthly_usd: 15.0 }
+    m7i.large:   { estimated_monthly_usd: 70.0 }
+    m7i.4xlarge: { estimated_monthly_usd: 500.0 }
+    g6.xlarge:   { estimated_monthly_usd: 730.0, classification_min: wide-operational, requires_approval: true }
+tags: [compute, aws]
+documentation: services/ec2-instance/README.md

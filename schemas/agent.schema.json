@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://asgard.dev/schemas/agent.schema.json",
+  "title": "Asgard Agent",
+  "description": "Canonical schema for an Asgard Agent entity manifest. An Agent represents an autonomous or assisted AI agent backed by a model, prompt, and a set of tools, owned by a group or user within the entity catalog.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "asgard.dev/v1"
+    },
+    "kind": {
+      "const": "Agent"
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string",
+          "default": "default"
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "owner",
+        "model"
+      ],
+      "properties": {
+        "owner": {
+          "type": "string",
+          "description": "EntityRef of the owning group or user, e.g. group:default/platform."
+        },
+        "model": {
+          "type": "string",
+          "description": "EntityRef of the backing model."
+        },
+        "prompt": {
+          "type": "string",
+          "description": "EntityRef of the prompt template."
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "EntityRef of a tool."
+          }
+        },
+        "policy": {
+          "type": [
+            "string",
+            "object"
+          ],
+          "description": "Policy name or inline policy object."
+        },
+        "dataClass": {
+          "enum": [
+            "public",
+            "internal",
+            "confidential",
+            "restricted"
+          ]
+        },
+        "project": {
+          "type": "string",
+          "description": "EntityRef of the owning project."
+        }
+      }
+    },
+    "relations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "target"
+        ],
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string",
+            "description": "EntityRef, e.g. kind:namespace/name."
+          }
+        }
+      }
+    }
+  }
+}

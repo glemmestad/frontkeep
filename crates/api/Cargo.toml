@@ -1,0 +1,23 @@
+[package]
+name = "asgard-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+asgard-storage.workspace = true
+asgard-catalog.workspace = true
+asgard-gateway.workspace = true
+asgard-workflow.workspace = true
+asgard-registry.workspace = true
+asgard-provision.workspace = true
+asgard-identity.workspace = true
+axum.workspace = true
+tower-http.workspace = true
+async-graphql.workspace = true
+async-graphql-axum.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+tokio.workspace = true
+tracing.workspace = true

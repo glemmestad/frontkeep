@@ -1,0 +1,14 @@
+apiVersion: asgard.dev/v1
+kind: Eval
+metadata:
+  name: code-review-quality
+  namespace: default
+  title: Code Review Quality
+spec:
+  owner: group:default/platform
+  suite: code-review-quality
+  thresholds:
+    min_pass_rate: 0.8
+    min_avg_score: 0.7
+  gatingTier: light-operational
+  target: agent:default/code-reviewer

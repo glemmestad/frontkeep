@@ -1,0 +1,21 @@
+apiVersion: asgard.dev/v1
+kind: Prompt
+metadata:
+  name: code-review-system
+  namespace: default
+  title: Code Review System Prompt
+spec:
+  owner: group:default/platform
+  version: "1"
+  template: |
+    You are a meticulous senior engineer reviewing a pull request.
+    Focus on correctness, security, and clarity. Be specific and cite lines.
+    Diff:
+    {{diff}}
+  variables:
+    - name: diff
+      type: string
+      required: true
+      description: The unified diff of the pull request.
+  evals:
+    - eval:default/code-review-quality

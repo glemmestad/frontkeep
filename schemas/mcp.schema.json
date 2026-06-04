@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://asgard.dev/schemas/mcp.schema.json",
+  "title": "Asgard MCPServer Manifest",
+  "description": "Canonical schema for Asgard catalog entities of kind Tool or MCPServer. Describes tools and Model Context Protocol (MCP) servers, including their transport, ownership, auth, and consumer visibility.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "asgard.dev/v1",
+      "description": "Asgard catalog API version."
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "Tool",
+        "MCPServer"
+      ],
+      "description": "Entity kind. Tool covers standalone tools; MCPServer covers Model Context Protocol servers."
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "description": "Identifying and descriptive metadata for the entity.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique entity name within its namespace."
+        },
+        "namespace": {
+          "type": "string",
+          "default": "default",
+          "description": "Namespace the entity belongs to."
+        },
+        "title": {
+          "type": "string",
+          "description": "Human-readable display title."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the entity."
+        },
+        "labels": {
+          "type": "object",
+          "description": "Key/value labels for selection and grouping.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "annotations": {
+          "type": "object",
+          "description": "Key/value annotations carrying non-identifying metadata.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "tags": {
+          "type": "array",
+          "description": "Free-form tags.",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "owner",
+        "transport"
+      ],
+      "description": "MCPServer/Tool specification.",
+      "properties": {
+        "owner": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*:[a-z0-9][a-z0-9-]*/[A-Za-z0-9][A-Za-z0-9._-]*$",
+          "description": "EntityRef of the owning entity, in the form kind:namespace/name (e.g. group:default/platform)."
+        },
+        "transport": {
+          "type": "string",
+          "enum": [
+            "stdio",
+            "http",
+            "sse"
+          ],
+          "description": "Transport mechanism used to communicate with the server."
+        },
+        "endpoint": {
+          "type": "string",
+          "format": "uri",
+          "description": "Endpoint URI for http or sse transports."
+        },
+        "scopes": {
+          "type": "array",
+          "description": "Authorization scopes required or exposed by the server.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "auth": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Authentication configuration.",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "none",
+                "oauth",
+                "apikey",
+                "bearer"
+              ],
+              "description": "Authentication method."
+            }
+          }
+        },
+        "tools": {
+          "type": "array",
+          "description": "Names of the tools exposed by the server.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "visibility": {
+          "type": "string",
+          "enum": [
+            "project",
+            "group",
+            "all",
+            "public"
+          ],
+          "default": "project",
+          "description": "Who may discover and consume this entity."
+        },
+        "allowedConsumers": {
+          "type": "array",
+          "description": "EntityRefs or identifiers permitted to consume this entity.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "dataClass": {
+          "type": "string",
+          "enum": [
+            "public",
+            "internal",
+            "confidential",
+            "restricted"
+          ],
+          "description": "Data classification of information handled by this entity."
+        }
+      }
+    },
+    "relations": {
+      "type": "array",
+      "description": "Relationships from this entity to other catalog entities.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "target"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Relation type (e.g. dependsOn, partOf, consumedBy)."
+          },
+          "target": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*:[a-z0-9][a-z0-9-]*/[A-Za-z0-9][A-Za-z0-9._-]*$",
+            "description": "EntityRef of the target entity, in the form kind:namespace/name."
+          }
+        }
+      }
+    }
+  }
+}

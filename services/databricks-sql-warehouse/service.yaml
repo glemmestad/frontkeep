@@ -1,0 +1,27 @@
+id: databricks-sql-warehouse
+name: Databricks SQL Warehouse
+category: compute
+status: live
+classification_min: poc
+classification_max: critical-path
+description: >-
+  A Databricks SQL warehouse (serverless or pro) — the query compute analysts and
+  agents run against. Provisioned through Asgard's universal terraform connector +
+  the Databricks provider, so it carries the same gate, classification floor,
+  approval tier, project tagging, and audit as any AWS resource. Always requires
+  human approval (cost-bearing). Asgard orchestrates Databricks; it does not
+  replace it.
+auto_approvable: false
+required_fields: [name, cluster_size]
+provisioner:
+  connector: terraform
+  config:
+    module: ./modules/databricks/sql-warehouse
+    cloud: databricks
+cost:
+  model: usage
+  estimated_monthly_usd: 200.0
+  source:
+    type: databricks-billing
+tags: [compute, databricks, sql]
+documentation: services/databricks-sql-warehouse/README.md

@@ -1,0 +1,27 @@
+[package]
+name = "asgard-registry"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+asgard-storage.workspace = true
+asgard-catalog.workspace = true
+asgard-gateway.workspace = true
+asgard-workflow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+schemars = { version = "1", optional = true }
+
+[features]
+schemars = ["dep:schemars"]
+
+[dev-dependencies]
+tokio.workspace = true
+asgard-policy.workspace = true

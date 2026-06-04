@@ -1,0 +1,9 @@
+target
+**/target
+web/node_modules
+docs/node_modules
+docs/build
+.git
+BUILD_BRIEF.md
+*.db
+data

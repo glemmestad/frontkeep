@@ -1,0 +1,38 @@
+apiVersion: asgard.dev/v1
+kind: MCPServer
+metadata:
+  name: filesystem-mcp
+  namespace: default
+  title: Filesystem MCP Server
+  description: MCP server exposing read and write access to a sandboxed local filesystem.
+  labels:
+    team: platform
+    tier: internal
+  annotations:
+    asgard.dev/source-repo: https://github.com/modelcontextprotocol/servers
+  tags:
+    - mcp
+    - filesystem
+    - storage
+spec:
+  owner: group:default/platform
+  transport: stdio
+  scopes:
+    - files:read
+    - files:write
+  auth:
+    type: none
+  tools:
+    - read_file
+    - write_file
+    - list_directory
+  visibility: group
+  allowedConsumers:
+    - group:default/data-science
+    - user:default/alice
+  dataClass: internal
+relations:
+  - type: dependsOn
+    target: resource:default/local-storage
+  - type: ownedBy
+    target: group:default/platform

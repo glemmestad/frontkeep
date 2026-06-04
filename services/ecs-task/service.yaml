@@ -1,0 +1,21 @@
+id: ecs-task
+name: ECS Task
+category: compute
+status: live
+classification_min: poc
+classification_max: critical-path
+description: Run a container task on serverless compute from an ECR image.
+auto_approvable: true
+required_fields: [name, image]
+provisioner:
+  connector: terraform
+  config:
+    module: ./modules/aws/ecs-task
+    cloud: aws
+cost:
+  model: usage
+  estimated_monthly_usd: 5.0
+  source:
+    type: aws-cost-explorer
+tags: [compute, aws]
+documentation: services/ecs-task/README.md

@@ -1,0 +1,30 @@
+id: ecs-service
+name: ECS Service (load-balanced)
+category: compute
+status: live
+classification_min: poc
+classification_max: critical-path
+description: >-
+  A load-balanced Fargate service behind an Application Load Balancer: cluster +
+  task definition + ALB + target group + listener, with a task role built from an
+  explicit grants object and an optional HTTPS listener. The keystone primitive
+  for standing a web-facing container app behind a stable URL. Always requires
+  human approval (cost-bearing, IAM-shaping).
+auto_approvable: false
+required_fields: [name, image, vpc_id, subnet_ids]
+provisioner:
+  connector: terraform
+  config:
+    module: ./modules/aws/ecs-service
+    cloud: aws
+    # Kill suspends the service to halt charges by re-applying with the task count
+    # at zero; un-kill re-applies the original spec.
+    stop_tfvars:
+      desired_count: 0
+cost:
+  model: usage
+  estimated_monthly_usd: 35.0
+  source:
+    type: aws-cost-explorer
+tags: [compute, aws, alb, fargate]
+documentation: services/ecs-service/README.md

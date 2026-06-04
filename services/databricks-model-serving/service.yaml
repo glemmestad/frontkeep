@@ -1,0 +1,27 @@
+id: databricks-model-serving
+name: Databricks Model Serving Endpoint
+category: llm
+status: live
+classification_min: poc
+classification_max: critical-path
+description: >-
+  A Databricks Model Serving endpoint serving a registered model. Provisioned
+  through Asgard's terraform connector + the Databricks provider — gated,
+  tier-classified, project-tagged, audited. Closes the loop with the `databricks`
+  inference module: provision an endpoint here, then add its name to that module's
+  models so Asgard's gateway fronts it. Always requires human approval
+  (cost-bearing serving compute).
+auto_approvable: false
+required_fields: [name, entity_name]
+provisioner:
+  connector: terraform
+  config:
+    module: ./modules/databricks/model-serving
+    cloud: databricks
+cost:
+  model: usage
+  estimated_monthly_usd: 150.0
+  source:
+    type: databricks-billing
+tags: [llm, databricks, serving, mosaic-ai]
+documentation: services/databricks-model-serving/README.md

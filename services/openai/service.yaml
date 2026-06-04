@@ -1,0 +1,22 @@
+id: openai
+name: OpenAI
+category: llm
+status: live
+description: >-
+  OpenAI inference, reached directly via its OpenAI-compatible API. Part of the
+  built-in lightweight floor — active when OPENAI_MASTER_KEY is set. Projects get
+  an Asgard token, never this master key; spend is attributed per token.
+# Not provisioned — the gateway routes to it. stub keeps the manifest uniform.
+provisioner:
+  connector: stub
+cost:
+  model: usage
+  source:
+    type: gateway
+inference:
+  kind: openai
+  api_key_env: OPENAI_MASTER_KEY
+  models:
+    - { ref: model:default/gpt-5.1, route: gpt-5.1, data_classes: [public, internal, confidential], cost_in: 0.00125, cost_out: 0.01 }
+    - { ref: model:openai/gpt-5-mini, route: gpt-5-mini, data_classes: [public, internal, confidential], cost_in: 0.00025, cost_out: 0.002 }
+tags: [llm, inference, openai]

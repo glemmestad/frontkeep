@@ -1,0 +1,73 @@
+---
+sidebar_position: 2.5
+title: Governed onboarding loop
+---
+
+# Governed onboarding loop
+
+Asgard's headline workflow is a **governed onboarding loop** for AI/agent work, designed agents-first: every capability below is an MCP tool, not just a UI button.
+
+> Point any new effort's agent at the seed → it learns the standards → it registers the project (the gate) → that unlocks gateway keys and resources → all spend is attributed by project / owner / manager / group.
+
+## 1. The seed
+
+`seed/` is the repo you point people at: *"tell your AI agent to read `AGENTS.md`, then go build."* Its `AGENTS.md` encodes the four-move loop and names the MCP tools; `.agent/{STANDARDS,SECURITY,WORKFLOW}.md` are the enterprise standards. Those same files are embedded in the binary and seed the standards store on first boot, so a fresh deployment's served standards match the repo. From there an admin can edit them in the dashboard (every edit is versioned); agents always read the authoritative served copy over MCP.
+
+```text
+list_standards / get_standards   →  the conventions your output must meet
+register_project                 →  the mandatory gate (mints proj-YYYY-NNNN)
+catalog_search / catalog_get     →  discover what already exists
+gateway_credential / gateway_chat→  call models through the governed gateway
+request_resource                 →  provision infra for your project
+cost_report                      →  spend attributed to your project
+```
+
+## 2. Registration is the gate
+
+A project must be **registered and active** before Asgard will mint a gateway key or provision a resource. Registration records the owner, manager, group/cost-center, classification and budget, and mints a stable `proj-YYYY-NNNN` id.
+
+```bash
+asgard project register \
+  --name "Fraud Detection" \
+  --owner alice@corp.example --manager bob@corp.example \
+  --group platform --classification poc --budget-usd 100
+```
+
+- `owner` and `manager` are self-entered emails (unverified — no OIDC required) and must differ.
+- `group` must be one of the cost-centers the deployer allows (see below). Discover them with `list_groups` / `GET /api/groups`.
+- An unregistered or decommissioned project gets a `403` when it tries to mint a key or request a resource.
+
+### Operator-configured cost-centers
+
+The deployer pre-specifies the valid groups in `asgard.yaml`. An empty list means "open mode" (any group accepted, recorded as-is).
+
+```yaml
+groups:
+  - { key: platform, display_name: Platform Engineering, cost_center: CC-1001 }
+  - { key: research,  display_name: Research,             cost_center: CC-2002 }
+```
+
+## 3. Cost segregated by dimension
+
+Every gateway call is attributed to its project, and the owner / manager / group / cost-center / classification are denormalized onto each usage event at write time — so cost rolls up by any of them with a single query, and historical spend stays attributed to who owned the project when the cost was incurred.
+
+```bash
+asgard project cost --by group       # or: project | owner | manager | classification | model | provider
+# REST:  GET /api/cost?by=group
+# MCP:   cost_report { "by": "group" }
+```
+
+## 4. Provisioning through the orchestrator
+
+Resources are requested through Asgard so they're owned, governed, and cost-tagged. Cheap, reversible types (object storage, key/value tables, secrets) auto-provision; high blast-radius types (databases, compute) require platform approval before they're fulfilled.
+
+```bash
+# MCP: request_resource { project_id, resource_type: "s3-bucket", name: "assets", spec: {...} }
+# REST: POST /api/projects/{id}/resources
+```
+
+Every provisioned resource is stamped with `project=<id>` (and owner/group/cost-center) so its cost flows into the same rollup as model spend.
+
+:::note Provisioning backend
+The shipped backend is a **dry-run stub**: it computes the plan, tags and a cost estimate and returns deterministic outputs without touching any cloud — enough to drive the whole request → approve → fulfill → cost loop. A live cloud backend implements the same `Provisioner` trait and is selected by configuration; turning it on is an explicit operator decision.
+:::

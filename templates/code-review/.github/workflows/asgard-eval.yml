@@ -1,0 +1,21 @@
+name: asgard-eval
+
+on: [pull_request]
+
+# Evals are CI for non-determinism: this gate runs the agent's eval suite on each
+# PR, posts a scored verdict as a comment, and blocks merge if the suite fails.
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Asgard eval gate
+        env:
+          ASGARD_URL: ${{ secrets.ASGARD_URL }}
+          ASGARD_TOKEN: ${{ secrets.ASGARD_TOKEN }}
+        run: |
+          asgard eval run \
+            --suite eval.yaml \
+            --cases cases.json \
+            --comment \
+            --gate

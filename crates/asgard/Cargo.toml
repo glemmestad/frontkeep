@@ -1,0 +1,37 @@
+[package]
+name = "asgard"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Open-source control plane for AI/agent development"
+
+[[bin]]
+name = "asgard"
+path = "src/main.rs"
+
+[dependencies]
+asgard-storage.workspace = true
+asgard-catalog.workspace = true
+asgard-policy.workspace = true
+asgard-gateway.workspace = true
+asgard-workflow.workspace = true
+asgard-registry.workspace = true
+asgard-provision.workspace = true
+asgard-eval.workspace = true
+asgard-identity.workspace = true
+asgard-api.workspace = true
+asgard-cli.workspace = true
+asgard-mcp.workspace = true
+axum.workspace = true
+clap.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_yaml.workspace = true
+serde_json.workspace = true
+rust-embed.workspace = true
+mime_guess.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+chrono.workspace = true
+dotenvy.workspace = true

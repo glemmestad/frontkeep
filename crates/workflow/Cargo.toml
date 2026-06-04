@@ -1,0 +1,18 @@
+[package]
+name = "asgard-workflow"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+asgard-storage.workspace = true
+asgard-policy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+sqlx.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

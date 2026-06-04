@@ -1,0 +1,35 @@
+apiVersion: asgard.dev/v1
+kind: Agent
+metadata:
+  name: incident-triage-bot
+  namespace: default
+  title: Incident Triage Bot
+  description: Summarizes new alerts, correlates related incidents, and proposes a severity level.
+  labels:
+    lifecycle: production
+    team: sre
+  annotations:
+    asgard.dev/source-location: url:https://github.com/example-org/incident-triage-bot
+  tags:
+    - observability
+    - on-call
+spec:
+  owner: group:default/sre
+  model: model:default/llama-3-70b-instruct
+  prompt: prompt:default/incident-triage-system
+  tools:
+    - tool:default/prometheus-query
+    - tool:default/pagerduty-lookup
+    - tool:default/runbook-search
+  policy:
+    rateLimitPerMinute: 30
+    allowedDataClasses:
+      - public
+      - internal
+  dataClass: internal
+  project: project:default/reliability-platform
+relations:
+  - type: ownedBy
+    target: group:default/sre
+  - type: dependsOn
+    target: model:default/llama-3-70b-instruct

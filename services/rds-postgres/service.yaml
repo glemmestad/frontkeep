@@ -1,0 +1,22 @@
+id: rds-postgres
+name: RDS PostgreSQL
+category: database
+status: live
+classification_min: poc
+classification_max: critical-path
+description: Managed PostgreSQL database (always requires human approval).
+auto_approvable: false
+required_fields: [name]
+provisioner:
+  connector: terraform
+  config:
+    module: ./modules/aws/rds-postgres
+    cloud: aws
+secret_outputs: [master_password, connection_url]
+cost:
+  model: usage
+  estimated_monthly_usd: 120.0
+  source:
+    type: aws-cost-explorer
+tags: [database, aws, managed]
+documentation: services/rds-postgres/README.md

@@ -1,0 +1,25 @@
+{
+  "description": "A real-time collaborative editor backend, assembled from Asgard primitives — the same shape as a production collaborative editor. Provisions a Postgres metadata store, an S3 bucket for document blobs/snapshots, an HMAC signing key, an Auth0 SPA app, and a load-balanced HTTPS service. You bring the server image; Asgard wires the infrastructure. The agent fills the inputs and issues each request_resource itself.",
+  "inputs": [
+    { "name": "image", "required": true, "description": "OCI image for the collab server; reads DATABASE_URL_SECRET_ARN, DOCS_BUCKET, TOKEN_KEY_SECRET_ARN, AUTH0_CLIENT_ID, listens on 8080 with /healthz. Use immutable :sha tags." },
+    { "name": "vpc_id", "required": true, "description": "Existing VPC (Asgard never creates one)." },
+    { "name": "subnet_ids", "required": true, "description": "Two or more subnets across AZs." },
+    { "name": "certificate_arn", "required": true, "description": "ACM cert for the app hostname; HTTPS is required for SPA login." },
+    { "name": "kms_arn", "required": true, "description": "KMS key wrapping the secrets, for the task role's kms:Decrypt." },
+    { "name": "tenant", "required": false, "default": "your-tenant", "description": "Auth0 tenant for the SPA app." }
+  ],
+  "steps": [
+    { "id": "db", "service": "rds-postgres", "description": "Document and session metadata.", "inputs": { "name": "collab-db", "engine_version": "16" } },
+    { "id": "docs", "service": "s3-bucket", "description": "Collaborative-document blobs and snapshots.", "inputs": { "name": "collab-docs" } },
+    { "id": "token-key", "service": "secretsmanager-secret", "description": "64-byte HMAC key for signing collab tokens.", "inputs": { "name": "collab-token-key", "byte_length": 64 } },
+    { "id": "spa", "service": "auth0-application", "description": "Browser login client.", "inputs": { "name": "collab-spa", "app_type": "spa" } },
+    { "id": "server", "service": "ecs-service", "description": "The collab server behind an HTTPS load balancer.", "inputs": {
+      "name": "collab", "image": "${inputs.image}", "vpc_id": "${inputs.vpc_id}", "subnet_ids": "${inputs.subnet_ids}",
+      "certificate_arn": "${inputs.certificate_arn}", "container_port": 8080, "health_path": "/healthz", "cpu": "512", "memory": "1024",
+      "env": { "DATABASE_URL_SECRET_ARN": "${steps.db.secret_arn}", "DOCS_BUCKET": "${steps.docs.bucket}", "TOKEN_KEY_SECRET_ARN": "${steps.token-key.secret_arn}", "AUTH0_CLIENT_ID": "${steps.spa.client_id}", "AUTH0_DOMAIN": "${inputs.tenant}" },
+      "grants": { "s3_write": ["${steps.docs.arn}"], "secrets_read": ["${steps.db.secret_arn}", "${steps.token-key.secret_arn}"], "kms_decrypt": ["${inputs.kms_arn}"] }
+    } }
+  ],
+  "outputs": { "url": "${steps.server.url}", "docs_bucket": "${steps.docs.bucket}" },
+  "after": "Re-apply the spa auth0-application with callbacks set to the service url (see the 'wire-auth0-into-a-spa' guidance). Move real data only in a human-gated window."
+}

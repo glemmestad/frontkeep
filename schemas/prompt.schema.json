@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://asgard.dev/schemas/prompt.schema.json",
+  "title": "Asgard Prompt",
+  "description": "A reusable LLM prompt template registered in the Asgard entity catalog, including its variables, owning team, and associated evaluations.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "asgard.dev/v1",
+      "description": "API version of the Asgard manifest envelope."
+    },
+    "kind": {
+      "const": "Prompt",
+      "description": "Entity kind discriminator."
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "description": "Catalog metadata shared by all Asgard entities.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique entity name within its namespace."
+        },
+        "namespace": {
+          "type": "string",
+          "default": "default",
+          "description": "Namespace the entity belongs to."
+        },
+        "title": {
+          "type": "string",
+          "description": "Human-readable display title."
+        },
+        "description": {
+          "type": "string",
+          "description": "Free-form description of the entity."
+        },
+        "labels": {
+          "type": "object",
+          "description": "Key/value labels for selection and grouping.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "annotations": {
+          "type": "object",
+          "description": "Key/value annotations for non-identifying metadata.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "tags": {
+          "type": "array",
+          "description": "Free-form tags.",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "owner",
+        "template"
+      ],
+      "description": "Prompt-specific specification.",
+      "properties": {
+        "owner": {
+          "type": "string",
+          "description": "EntityRef of the owning entity (e.g. \"group:default/platform\").",
+          "pattern": "^[a-z0-9-]+:[a-z0-9-]+/[A-Za-z0-9._-]+$"
+        },
+        "template": {
+          "type": "string",
+          "description": "The prompt template text, typically containing variable placeholders."
+        },
+        "variables": {
+          "type": "array",
+          "description": "Variables that may be interpolated into the template.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Variable name as referenced in the template."
+              },
+              "type": {
+                "type": "string",
+                "description": "Logical type of the variable (e.g. string, integer, boolean)."
+              },
+              "required": {
+                "type": "boolean",
+                "description": "Whether the variable must be supplied at render time."
+              },
+              "description": {
+                "type": "string",
+                "description": "Human-readable description of the variable."
+              }
+            }
+          }
+        },
+        "evals": {
+          "type": "array",
+          "description": "EntityRefs of evaluations associated with this prompt.",
+          "items": {
+            "type": "string",
+            "description": "EntityRef of an evaluation entity.",
+            "pattern": "^[a-z0-9-]+:[a-z0-9-]+/[A-Za-z0-9._-]+$"
+          }
+        },
+        "version": {
+          "type": "string",
+          "description": "Version identifier for this prompt revision."
+        }
+      }
+    },
+    "relations": {
+      "type": "array",
+      "description": "Typed relations to other catalog entities.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "target"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Relation type (e.g. \"dependsOn\", \"partOf\")."
+          },
+          "target": {
+            "type": "string",
+            "description": "EntityRef of the related entity.",
+            "pattern": "^[a-z0-9-]+:[a-z0-9-]+/[A-Za-z0-9._-]+$"
+          }
+        }
+      }
+    }
+  }
+}

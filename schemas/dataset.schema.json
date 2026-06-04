@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://asgard.dev/schemas/dataset.schema.json",
+  "title": "Asgard Dataset",
+  "description": "Canonical schema for an Asgard Dataset entity manifest. Describes a dataset used for training, evaluation, or retrieval-augmented generation, including its owner, classification, and source location.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "asgard.dev/v1",
+      "description": "Schema version of the Asgard manifest."
+    },
+    "kind": {
+      "const": "Dataset",
+      "description": "Entity kind discriminator."
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "description": "Identifying metadata for the entity.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique name of the entity within its namespace."
+        },
+        "namespace": {
+          "type": "string",
+          "default": "default",
+          "description": "Namespace the entity belongs to."
+        },
+        "title": {
+          "type": "string",
+          "description": "Human-readable display title."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the entity."
+        },
+        "labels": {
+          "type": "object",
+          "description": "Key/value labels used for selection and grouping.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "annotations": {
+          "type": "object",
+          "description": "Key/value annotations carrying non-identifying metadata.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "tags": {
+          "type": "array",
+          "description": "Free-form tags for discovery.",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "owner",
+        "classification",
+        "uri",
+        "purpose"
+      ],
+      "description": "Dataset-specific specification.",
+      "properties": {
+        "owner": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*:[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$",
+          "description": "EntityRef of the owning entity, formatted as 'kind:namespace/name' (e.g. 'group:default/platform')."
+        },
+        "classification": {
+          "type": "string",
+          "enum": [
+            "public",
+            "internal",
+            "confidential",
+            "restricted"
+          ],
+          "description": "Data classification level governing access and handling."
+        },
+        "uri": {
+          "type": "string",
+          "description": "Location of the dataset (e.g. an s3://, gs://, or https:// URI)."
+        },
+        "purpose": {
+          "type": "string",
+          "enum": [
+            "train",
+            "eval",
+            "rag"
+          ],
+          "description": "Intended use of the dataset."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the dataset contents."
+        }
+      }
+    },
+    "relations": {
+      "type": "array",
+      "description": "Typed relations from this entity to other entities.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "target"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Relation type (e.g. 'dependsOn', 'partOf')."
+          },
+          "target": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*:[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$",
+            "description": "EntityRef of the related entity, formatted as 'kind:namespace/name'."
+          }
+        }
+      }
+    }
+  }
+}

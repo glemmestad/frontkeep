@@ -1,0 +1,100 @@
+//! Dry-run connector. Computes the tag set and a cost estimate and returns
+//! deterministic outputs without touching any cloud — enough to drive the full
+//! request → approve → fulfill → cost loop in tests and demos. It is also the
+//! fallback when a manifest's declared connector isn't registered in this
+//! deployment, so the single binary works out of the box. Declared
+//! `secret_outputs` get generated values routed to the secret store by the
+//! caller; only refs land in the resource record.
+
+use async_trait::async_trait;
+use serde_json::{Map, Value};
+
+use crate::{secrets, Plan, ProvisionError, ProvisionRequest, Provisioned, Provisioner};
+
+#[derive(Default)]
+pub struct StubProvisioner;
+
+impl StubProvisioner {
+    pub fn new() -> Self {
+        StubProvisioner
+    }
+}
+
+#[async_trait]
+impl Provisioner for StubProvisioner {
+    fn name(&self) -> &str {
+        "stub"
+    }
+
+    fn dry_run(&self) -> bool {
+        true
+    }
+
+    fn supports(&self, _resource_type: &str) -> bool {
+        true
+    }
+
+    async fn plan(&self, req: &ProvisionRequest) -> Result<Plan, ProvisionError> {
+        Ok(Plan {
+            summary: format!(
+                "[dry-run] would create {} '{}' for {}",
+                req.resource_type, req.name, req.ctx.project_id
+            ),
+            tags: req.ctx.tags(),
+            estimated_monthly_usd: req.estimated_monthly_usd,
+        })
+    }
+
+    async fn apply(
+        &self,
+        req: &ProvisionRequest,
+        _plan: &Plan,
+    ) -> Result<Provisioned, ProvisionError> {
+        let arn = format!(
+            "arn:stub:{}:{}:{}",
+            req.resource_type, req.ctx.project_id, req.name
+        );
+        let mut outputs = Map::new();
+        outputs.insert("arn".into(), Value::String(arn.clone()));
+        match req.resource_type.as_str() {
+            "s3-bucket" => {
+                outputs.insert("bucket".into(), Value::String(req.name.clone()));
+            }
+            "rds-postgres" => {
+                outputs.insert(
+                    "endpoint".into(),
+                    Value::String(format!("{}.stub.local:5432", req.name)),
+                );
+            }
+            _ => {}
+        }
+        // Declared secret outputs get freshly generated values; the caller moves
+        // them to the secret store and records only a ref.
+        for key in &req.secret_outputs {
+            outputs.insert(key.clone(), Value::String(secrets::random_secret()));
+        }
+        Ok(Provisioned {
+            outputs: Value::Object(outputs),
+            resource_ids: vec![arn],
+            sensitive_keys: req.secret_outputs.clone(),
+        })
+    }
+
+    /// Simulate a successful suspend/resume so the governed kill→un-kill loop is
+    /// exercisable end-to-end without an armed cloud backend.
+    async fn stop(
+        &self,
+        _req: &ProvisionRequest,
+        _outputs: &Value,
+    ) -> Result<bool, ProvisionError> {
+        Ok(true)
+    }
+
+    async fn resume(
+        &self,
+        _req: &ProvisionRequest,
+        _outputs: &Value,
+    ) -> Result<bool, ProvisionError> {
+        Ok(true)
+    }
+}

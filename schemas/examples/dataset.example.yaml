@@ -1,0 +1,30 @@
+apiVersion: asgard.dev/v1
+kind: Dataset
+metadata:
+  name: wikipedia-en-corpus
+  namespace: default
+  title: English Wikipedia Corpus
+  description: Cleaned plaintext dump of English Wikipedia articles used for retrieval.
+  labels:
+    domain: encyclopedia
+    language: en
+  annotations:
+    asgard.dev/source-pipeline: corpus-ingest
+  tags:
+    - text
+    - knowledge-base
+    - retrieval
+spec:
+  owner: group:default/platform
+  classification: public
+  uri: s3://oss-datasets/wikipedia/en/2026-05-01/
+  purpose: rag
+  description: >-
+    Monthly snapshot of English Wikipedia, stripped of markup and segmented
+    into passages for use as a knowledge source in retrieval-augmented
+    generation.
+relations:
+  - type: dependsOn
+    target: pipeline:default/corpus-ingest
+  - type: ownedBy
+    target: group:default/platform

@@ -1,0 +1,54 @@
+apiVersion: asgard.dev/v1
+kind: Prompt
+metadata:
+  name: support-ticket-summarizer
+  namespace: default
+  title: Support Ticket Summarizer
+  description: >-
+    Condenses a customer support ticket thread into a short, actionable summary
+    for on-call engineers.
+  labels:
+    domain: support
+    surface: internal-tooling
+  annotations:
+    asgard.dev/data-class: internal
+  tags:
+    - summarization
+    - support
+spec:
+  owner: group:default/support-platform
+  version: 1.4.0
+  template: |
+    You are an assistant that summarizes customer support tickets.
+    Summarize the following ticket for an on-call engineer in {{max_sentences}} sentences.
+
+    Customer tier: {{customer_tier}}
+    Include next steps: {{include_next_steps}}
+
+    Ticket thread:
+    {{ticket_thread}}
+  variables:
+    - name: ticket_thread
+      type: string
+      required: true
+      description: The full concatenated text of the support ticket thread.
+    - name: max_sentences
+      type: integer
+      required: false
+      description: Maximum number of sentences in the summary.
+    - name: customer_tier
+      type: string
+      required: false
+      description: Customer support tier such as free, pro, or enterprise.
+    - name: include_next_steps
+      type: boolean
+      required: false
+      description: Whether to append recommended next steps.
+  evals:
+    - eval:default/summary-faithfulness
+    - eval:default/summary-length-guardrail
+relations:
+  - type: ownedBy
+    target: group:default/support-platform
+  - type: dependsOn
+    target: model:default/gpt-oss-summarizer

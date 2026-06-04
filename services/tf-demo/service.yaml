@@ -1,0 +1,20 @@
+id: tf-demo
+name: Terraform Demo (local)
+category: tooling
+status: live
+classification_min: poc
+classification_max: wide-operational
+description: Example of the universal Terraform connector against a cloud-free local module. Emits a sensitive token routed to the secret store.
+auto_approvable: true
+required_fields: [name]
+provisioner:
+  connector: terraform
+  config:
+    module: ./modules/local-demo
+cost:
+  model: free
+  estimated_monthly_usd: 0.0
+  source:
+    type: none
+tags: [tooling, terraform, example]
+documentation: services/tf-demo/README.md

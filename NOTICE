@@ -1,0 +1,18 @@
+Asgard
+Copyright 2026 The Asgard Authors
+
+This product includes software developed by the Asgard project.
+
+Licensed under the Apache License, Version 2.0. See the LICENSE file.
+
+The agent-seed feature (selectable, per-language/per-domain repository guidance
+served over MCP) is inspired by the "agent-seed" pattern — a markdown-first,
+layered repo-guidance seed. The guidance text shipped here is original to this
+project; the design owes the layered taxonomy and the anti-one-shot framing to
+that prior art.
+
+This project depends on third-party open-source software, each under its own
+license. Notable runtime/build dependencies include the Rust standard library
+and crates resolved by Cargo (see Cargo.lock), and the web UI's npm
+dependencies (see web/package-lock.json). Their licenses are retained by their
+respective authors.

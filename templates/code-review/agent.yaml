@@ -1,0 +1,21 @@
+apiVersion: asgard.dev/v1
+kind: Agent
+metadata:
+  name: code-reviewer
+  namespace: default
+  title: Code Reviewer
+  description: Reviews pull requests for correctness, security, and clarity.
+  tags:
+    - code-review
+    - ci
+spec:
+  owner: group:default/platform
+  model: model:default/gpt-4o
+  prompt: prompt:default/code-review-system
+  tools:
+    - tool:default/github
+  dataClass: internal
+  project: project:default/dev-productivity
+relations:
+  - type: ownedBy
+    target: group:default/platform

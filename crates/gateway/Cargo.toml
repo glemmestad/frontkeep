@@ -1,0 +1,24 @@
+[package]
+name = "asgard-gateway"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+asgard-storage.workspace = true
+asgard-policy.workspace = true
+asgard-catalog.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true
+sqlx.workspace = true
+reqwest.workspace = true
+regex.workspace = true
+sha2.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

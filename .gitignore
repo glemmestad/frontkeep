@@ -1,0 +1,53 @@
+# Rust
+/target
+**/target
+**/*.rs.bk
+
+# Local databases / state
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+/data
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Node / web build
+node_modules
+web/dist
+web/build
+web/node_modules
+
+# Docs site build
+docs/build
+docs/.docusaurus
+docs/node_modules
+
+# OS / editor
+.DS_Store
+*.swp
+
+# Local-only working docs (planning, build logs, session state, scratch). These
+# may contain references that must never be published; keep them out of the
+# public repo entirely.
+/plans/
+.context/
+BUILD_BRIEF.md
+CHATLOG.md
+COMPETITIVE_ANALYSIS.md
+
+# Local operator config (deployment-specific; use `asgard init` to generate)
+asgard.yaml
+
+# Terraform: modules under modules/ are templates the connector copies + inits at
+# apply time. Provider caches, platform-specific lock files, and state are never
+# committed.
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*

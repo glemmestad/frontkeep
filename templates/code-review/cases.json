@@ -1,0 +1,12 @@
+{
+  "eval_ref": "eval:default/code-review-quality",
+  "scorer": "Contains",
+  "thresholds": { "min_pass_rate": 0.8, "min_avg_score": 0.7 },
+  "cases": [
+    { "input": "diff: removed input validation on user email field", "expected": "validation" },
+    { "input": "diff: added SQL query built with string concatenation of user input", "expected": "injection" },
+    { "input": "diff: hardcoded AWS secret key in source", "expected": "secret" },
+    { "input": "diff: function with no error handling on network call", "expected": "error" },
+    { "input": "diff: renamed variable for clarity, no behavior change", "expected": "clarity" }
+  ]
+}

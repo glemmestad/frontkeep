@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://asgard.dev/schemas/eval.schema.json",
+  "title": "Asgard Eval",
+  "description": "Schema for an Asgard Eval entity: a quality/regression evaluation suite with pass thresholds and a gating tier that governs how strongly its results gate the target it evaluates.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "asgard.dev/v1",
+      "description": "API version for all Asgard manifests."
+    },
+    "kind": {
+      "const": "Eval",
+      "description": "Entity kind discriminator."
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "description": "Common entity metadata shared by all Asgard kinds.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique name of the entity within its namespace."
+        },
+        "namespace": {
+          "type": "string",
+          "default": "default",
+          "description": "Namespace the entity belongs to."
+        },
+        "title": {
+          "type": "string",
+          "description": "Human-readable display title."
+        },
+        "description": {
+          "type": "string",
+          "description": "Free-form description of the entity."
+        },
+        "labels": {
+          "type": "object",
+          "description": "Key/value labels used for selection and grouping.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "annotations": {
+          "type": "object",
+          "description": "Key/value annotations carrying non-identifying metadata.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "tags": {
+          "type": "array",
+          "description": "Free-form tags for discovery.",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "owner",
+        "suite",
+        "thresholds"
+      ],
+      "description": "Eval-specific specification.",
+      "properties": {
+        "owner": {
+          "type": "string",
+          "description": "EntityRef of the owning entity, formatted as 'kind:namespace/name' (e.g. 'group:default/platform').",
+          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?:[a-z0-9]([-a-z0-9]*[a-z0-9])?/[a-z0-9]([-a-z0-9._]*[a-z0-9])?$"
+        },
+        "suite": {
+          "type": "string",
+          "description": "Identifier of the evaluation suite that produces the scored results."
+        },
+        "thresholds": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Acceptance thresholds the suite must meet to be considered passing.",
+          "properties": {
+            "min_pass_rate": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Minimum fraction of evaluation cases that must pass (0..1)."
+            },
+            "min_avg_score": {
+              "type": "number",
+              "description": "Minimum average score across evaluation cases."
+            }
+          }
+        },
+        "gatingTier": {
+          "type": "string",
+          "enum": [
+            "poc",
+            "light-operational",
+            "wide-operational",
+            "critical-path"
+          ],
+          "description": "How strongly this eval gates the target: 'poc' (informational) through 'critical-path' (hard gate)."
+        },
+        "target": {
+          "type": "string",
+          "description": "EntityRef of the entity this eval evaluates, formatted as 'kind:namespace/name'.",
+          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?:[a-z0-9]([-a-z0-9]*[a-z0-9])?/[a-z0-9]([-a-z0-9._]*[a-z0-9])?$"
+        }
+      }
+    },
+    "relations": {
+      "type": "array",
+      "description": "Typed relationships from this entity to other entities.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "target"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Relationship type (e.g. 'dependsOn', 'partOf')."
+          },
+          "target": {
+            "type": "string",
+            "description": "EntityRef of the related entity, formatted as 'kind:namespace/name'.",
+            "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?:[a-z0-9]([-a-z0-9]*[a-z0-9])?/[a-z0-9]([-a-z0-9._]*[a-z0-9])?$"
+          }
+        }
+      }
+    }
+  }
+}

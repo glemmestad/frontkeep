@@ -1,0 +1,20 @@
+# Project manifest stub. You normally register via the Asgard MCP tool
+# `register_project` (which mints the canonical proj-YYYY-NNNN id); this file is
+# an illustrative reference of the shape and a place to record the result.
+#
+# `group` must be one of the cost-centers the Asgard deployer allows
+# (ask via the `list_groups` MCP tool or `GET /api/groups`). Owner and manager
+# are emails (self-entered, unverified) and must be two different people.
+apiVersion: asgard.dev/v1
+kind: Project
+metadata:
+  name: CHANGE_ME          # replaced by the minted proj-YYYY-NNNN after registration
+  title: CHANGE_ME         # human-readable project name
+spec:
+  id: CHANGE_ME            # set to the minted id once registered
+  owner: you@your-org.example
+  manager: your-manager@your-org.example
+  group: CHANGE_ME         # one of the allowed cost-centers
+  classification: poc      # poc | light-operational | wide-operational | critical-path
+  budgetUsd: 0
+  lifecycle: active

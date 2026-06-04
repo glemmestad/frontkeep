@@ -1,0 +1,21 @@
+id: random-secret
+name: Random Secret
+category: tooling
+status: live
+classification_min: poc
+classification_max: critical-path
+description: Random cryptographic material stored in the secret store; only a reference is returned.
+auto_approvable: true
+required_fields: [name]
+provisioner:
+  connector: stub
+  config:
+    kind: random-secret
+secret_outputs: [value]
+cost:
+  model: free
+  estimated_monthly_usd: 0.5
+  source:
+    type: none
+tags: [tooling, secret]
+documentation: services/random-secret/README.md

@@ -1,0 +1,27 @@
+id: secretsmanager-secret
+name: Secrets Manager Secret
+category: identity
+status: live
+classification_min: poc
+classification_max: critical-path
+description: >-
+  Random cryptographic material stored in AWS Secrets Manager, returning a
+  non-secret ARN a sibling ecs-service can inject (secrets:) or read at runtime
+  (grants.secrets_read). The AWS-backed counterpart to random-secret, which keeps
+  material in Asgard's own store. The generated value is routed to the secret
+  store; only a reference is recorded.
+auto_approvable: true
+required_fields: [name]
+provisioner:
+  connector: terraform
+  config:
+    module: ./modules/aws/secretsmanager-secret
+    cloud: aws
+secret_outputs: [value]
+cost:
+  model: flat
+  estimated_monthly_usd: 0.5
+  source:
+    type: aws-cost-explorer
+tags: [identity, secret, aws]
+documentation: services/secretsmanager-secret/README.md

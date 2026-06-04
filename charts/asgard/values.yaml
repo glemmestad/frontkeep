@@ -1,0 +1,31 @@
+# Kubernetes is supported but never required. For most installs, `docker run` or
+# systemd is simpler. Use this chart when you want HA: switch databaseUrl to a
+# Postgres DSN and raise replicaCount — the same binary, stateless replicas.
+replicaCount: 1
+
+image:
+  repository: ghcr.io/asgard/asgard
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# SQLite (single replica) by default. For replicaCount > 1, set a postgres:// DSN.
+databaseUrl: "sqlite:///data/asgard.db"
+
+# Name of a Secret holding ASGARD_GIT_TOKEN and any provider keys.
+envSecretName: ""
+
+service:
+  type: ClusterIP
+  port: 8080
+
+persistence:
+  enabled: true
+  size: 1Gi
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi

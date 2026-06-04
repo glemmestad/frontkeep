@@ -1,0 +1,20 @@
+id: anthropic
+name: Anthropic
+category: llm
+status: live
+description: >-
+  Anthropic Claude inference via the native Messages API. Part of the built-in
+  lightweight floor — active when ANTHROPIC_MASTER_KEY is set. Proves the floor is
+  not OpenAI-tied. Projects get an Asgard token, never this master key.
+provisioner:
+  connector: stub
+cost:
+  model: usage
+  source:
+    type: gateway
+inference:
+  kind: anthropic
+  api_key_env: ANTHROPIC_MASTER_KEY
+  models:
+    - { ref: model:anthropic/claude-sonnet, route: claude-sonnet-4-6, data_classes: [public, internal, confidential], cost_in: 0.003, cost_out: 0.015 }
+tags: [llm, inference, anthropic]

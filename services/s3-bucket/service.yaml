@@ -1,0 +1,21 @@
+id: s3-bucket
+name: S3 Bucket
+category: storage
+status: live
+classification_min: poc
+classification_max: critical-path
+description: Private, versioned, encrypted object-storage bucket.
+auto_approvable: true
+required_fields: [name]
+provisioner:
+  connector: terraform
+  config:
+    module: ./modules/aws/s3-bucket
+    cloud: aws
+cost:
+  model: usage
+  estimated_monthly_usd: 5.0
+  source:
+    type: aws-cost-explorer
+tags: [storage, aws]
+documentation: services/s3-bucket/README.md
