@@ -1,3 +1,12 @@
+## [0.5.1](https://github.com/glemmestad/asgard/compare/v0.5.0...v0.5.1) (2026-06-04)
+
+
+### Bug Fixes
+
+* **mcp:** render free-form spec fields as object schemas ([#13](https://github.com/glemmestad/asgard/issues/13)) ([1e273d8](https://github.com/glemmestad/asgard/commit/1e273d8ad819a86f0583b2681abe532ea832ca27))
+* **release:** bump crate versions in lockstep with release tag ([#14](https://github.com/glemmestad/asgard/issues/14)) ([a6a2416](https://github.com/glemmestad/asgard/commit/a6a24168335084a7a0ab0a976f0a292d00102aa7))
+* **release:** correct semantic-release-cargo install target format ([#15](https://github.com/glemmestad/asgard/issues/15)) ([5140b59](https://github.com/glemmestad/asgard/commit/5140b592fc047d32509cad891970aca68c97662e))
+
 # [0.5.0](https://github.com/glemmestad/asgard/compare/v0.4.2...v0.5.0) (2026-06-04)
 
 
