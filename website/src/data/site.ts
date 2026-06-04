@@ -40,7 +40,7 @@ export const loop = [
     n: '03',
     key: 'provision',
     title: 'Provision through the orchestrator',
-    body: 'Registration unlocks gateway keys and real services. Cheap, reversible resources auto-provision; high blast-radius ones route for approval. Every resource is tagged with the project.',
+    body: 'Registration unlocks gateway keys and real services. Cheap, reversible resources auto-provision; high blast-radius ones route for approval. Every resource is tagged with the project, and access between resources is itself a governed request, so one service reaches another only when the grant is filed, scoped and audited.',
     tool: 'request_resource',
   },
   {
@@ -95,6 +95,8 @@ export const mcpTools = [
   'catalog_get',
   'gateway_credential',
   'request_resource',
+  'request_grant',
+  'mcp_catalog_publish',
   'request_promotion',
   'cost_report',
 ];
@@ -154,5 +156,9 @@ export const faqs = [
   {
     q: 'How do we add our own services?',
     a: 'Drop a service.yaml manifest and a Terraform module, no recompile. The manifest declares how the service is provisioned and how its cost is attributed. Non-AWS providers use the exact same path.',
+  },
+  {
+    q: 'Can teams share their own MCP servers?',
+    a: 'Yes. Asgard ships an MCP catalog: a publishable registry of MCP servers, kept separate from the provisioning catalog because it’s opt-in sharing, not derived from what a project built. Company-approved and user-submitted servers sit side by side, each with an owner as contact and a ready-to-paste install snippet for Claude Code, Codex or Cursor. An agent browses it over MCP; a user publishes one with their token.',
   },
 ];
