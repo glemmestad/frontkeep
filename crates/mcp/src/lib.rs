@@ -166,6 +166,12 @@ pub struct RecipeGetArgs {
     pub slug: String,
 }
 
+/// schemars renders `serde_json::Value` as a boolean (`true`) schema, which some
+/// MCP clients reject as a property-level input schema. Emit a free-form object.
+fn freeform_object(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({ "type": "object" })
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct RecipePutArgs {
     #[serde(default)]
@@ -178,6 +184,7 @@ pub struct RecipePutArgs {
     pub body: String,
     /// Optional machine-readable at-a-glance: { description, inputs, steps, outputs }.
     #[serde(default)]
+    #[schemars(schema_with = "freeform_object")]
     pub spec: serde_json::Value,
     #[serde(default)]
     pub tags: Vec<String>,
@@ -226,6 +233,7 @@ pub struct RequestResourceArgs {
     pub project_id: Option<String>,
     pub resource_type: String,
     pub name: String,
+    #[schemars(schema_with = "freeform_object")]
     pub spec: Option<serde_json::Value>,
     pub requester: Option<String>,
 }
@@ -1664,6 +1672,27 @@ mod tests {
         assert_eq!(info.server_info.name, "asgard");
         assert!(info.capabilities.tools.is_some());
         assert!(info.capabilities.prompts.is_some());
+    }
+
+    #[tokio::test]
+    async fn every_tool_input_schema_is_client_valid() {
+        let s = server(None).await;
+        for tool in s.tool_router.list_all() {
+            let props = tool
+                .input_schema
+                .get("properties")
+                .and_then(|p| p.as_object());
+            let Some(props) = props else { continue };
+            for (field, schema) in props {
+                assert!(
+                    schema.is_object(),
+                    "tool `{}` field `{}` renders as a non-object JSON Schema ({schema}); \
+                     strict MCP clients reject this. Annotate the field with a concrete schema.",
+                    tool.name,
+                    field,
+                );
+            }
+        }
     }
 
     #[tokio::test]
