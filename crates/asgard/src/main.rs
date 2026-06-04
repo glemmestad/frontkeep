@@ -1075,16 +1075,26 @@ fn auto_approve_ceilings_from_env() -> Option<std::collections::BTreeMap<String,
 }
 
 fn provisioning_from_env() -> Option<ProvisioningCfg> {
-    let modules_dir = std::env::var("ASGARD_TF_MODULES_DIR").ok()?;
+    let modules_dir = std::env::var("ASGARD_TF_MODULES_DIR").ok();
+    let services_dir = std::env::var("ASGARD_SERVICES_DIR").ok();
+    // Arm if either the terraform modules or a service-definition overlay is set,
+    // so a customer can add their own `service.yaml`s (over the embedded catalog)
+    // by pointing one env var at a dir — whether that dir is baked into a derived
+    // image, an EFS/volume mount, or synced from object storage by a sidecar.
+    if modules_dir.is_none() && services_dir.is_none() {
+        return None;
+    }
     Some(provisioning_cfg_from_parts(
         modules_dir,
+        services_dir,
         std::env::var("ASGARD_TF_WORK_DIR").ok(),
         std::env::var("ASGARD_TF_ALLOWED").ok(),
     ))
 }
 
 fn provisioning_cfg_from_parts(
-    modules_dir: String,
+    modules_dir: Option<String>,
+    services_dir: Option<String>,
     work_dir: Option<String>,
     allowed_csv: Option<String>,
 ) -> ProvisioningCfg {
@@ -1111,9 +1121,12 @@ fn provisioning_cfg_from_parts(
         default_cloud,
         default_account,
         allowed,
-        terraform: Some(TerraformCfg {
+        services_dir: services_dir.map(PathBuf::from),
+        // The terraform connector arms only when a modules dir is given; a
+        // services-only overlay still loads (its services use other connectors).
+        terraform: modules_dir.map(|m| TerraformCfg {
             bin: default_tf_bin(),
-            modules_dir: PathBuf::from(modules_dir),
+            modules_dir: PathBuf::from(m),
             work_dir: work_dir.map(PathBuf::from),
         }),
         ..Default::default()
@@ -1619,7 +1632,8 @@ mod tests {
     #[test]
     fn env_arming_defaults_target_to_the_sole_allowed_entry() {
         let cfg = provisioning_cfg_from_parts(
-            "/modules".into(),
+            Some("/modules".into()),
+            None,
             Some("/data/tf".into()),
             Some("auth0:psiq-tenant".into()),
         );
@@ -1633,9 +1647,21 @@ mod tests {
 
     #[test]
     fn env_arming_without_allowlist_sets_no_default_target() {
-        let cfg = provisioning_cfg_from_parts("/modules".into(), None, None);
+        let cfg = provisioning_cfg_from_parts(Some("/modules".into()), None, None, None);
         assert!(cfg.default_cloud.is_none());
         assert!(cfg.default_account.is_none());
         assert!(cfg.allowed.is_empty());
+    }
+
+    #[test]
+    fn services_overlay_arms_without_terraform() {
+        // A customer adds their own service definitions by pointing
+        // ASGARD_SERVICES_DIR at an overlay dir — no terraform modules required.
+        let cfg = provisioning_cfg_from_parts(None, Some("/srv/overlay".into()), None, None);
+        assert_eq!(cfg.services_dir, Some(PathBuf::from("/srv/overlay")));
+        assert!(
+            cfg.terraform.is_none(),
+            "no modules dir → terraform connector stays unarmed"
+        );
     }
 }

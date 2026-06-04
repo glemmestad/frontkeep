@@ -440,6 +440,42 @@ assume into several; the first entry is the default target.
 This is the recommended path for a container deploy — no `asgard.yaml` needed for
 the headline feature. (You still set the provider creds below, e.g. `AUTH0_*`.)
 
+#### Bring your own services (operator overlay)
+
+The official image embeds the built-in catalog. To add **your own** provisionable
+services without a recompile, point `ASGARD_SERVICES_DIR` at a directory of
+`service.yaml` files (one per service, same shape as the built-ins). They overlay
+the embedded catalog, adding or overriding by `id`. Each service that uses the
+`terraform` connector references a module under `ASGARD_TF_MODULES_DIR`. Setting
+`ASGARD_SERVICES_DIR` alone arms the overlay even without Terraform (services on
+other connectors still load).
+
+How the files get to that directory is your call — three patterns, lightest first:
+
+1. **Derived image** (keeps the single-versioned-artifact property): build `FROM
+   asgard:<tag>`, `COPY` your `service.yaml`s and TF modules in, and set the two
+   env vars. The catalog is versioned with the image. Best when the catalog changes
+   at deploy cadence.
+   ```dockerfile
+   FROM asgard:0.7
+   COPY my-services/ /srv/services/
+   COPY my-modules/  /srv/modules/
+   ENV ASGARD_SERVICES_DIR=/srv/services
+   ENV ASGARD_TF_MODULES_DIR=/srv/modules
+   ```
+2. **Shared volume / EFS mount** (mutate the catalog without a redeploy): mount one
+   EFS access point (or any volume) into every task and set
+   `ASGARD_SERVICES_DIR=/mnt/services`, `ASGARD_TF_MODULES_DIR=/mnt/modules`. Edit
+   files on the volume and every node sees them. Cost: you now run EFS, and config
+   lives outside the image.
+3. **Object-storage sync** (decoupled, no shared filesystem): an ECS sidecar or
+   container entrypoint syncs an S3 prefix into a local dir on start
+   (`aws s3 sync s3://my-bucket/services /srv/services`), then Asgard reads it via
+   `ASGARD_SERVICES_DIR`. Lighter than EFS; adds a startup step.
+
+All three converge on the same contract: **files at a path, two env vars pointed at
+it.** Asgard doesn't care which delivery you choose.
+
 > **Terraform state is durable in the database.** Around every apply/destroy,
 > Asgard snapshots each resource's state into its own DB (the same SQLite or
 > Postgres as everything else), encrypted with the master key. So `work_dir` is
@@ -515,6 +551,7 @@ plaintext, or the audit log.
 | `ASGARD_FORCE_HTTPS` | `1`/`true` forces `Secure` on auth cookies regardless of detected scheme — "HTTPS is required." Set this when TLS is mandatory everywhere. | off (adaptive) |
 | `AUTH0_DOMAIN` / `AUTH0_CLIENT_ID` / `AUTH0_CLIENT_SECRET` | M2M creds passed through to the Terraform Auth0 provider when provisioning is armed. | — |
 | `ASGARD_TF_MODULES_DIR` | Arms the `terraform` connector **without a config file** — point it at the bundled modules (`/modules`). Presence is what registers the connector. | (off) |
+| `ASGARD_SERVICES_DIR` | Operator overlay dir of your own `service.yaml` files (added/overridden by `id` on top of the embedded catalog). Lets a deployed image add services without a recompile or an `asgard.yaml`; arms the overlay even without Terraform. See *Bring your own services*. | (off) |
 | `ASGARD_TF_WORK_DIR` | Scratch dir for Terraform working dirs. **State itself is kept (encrypted) in the DB**, so this may be ephemeral. | system temp |
 | `ASGARD_TF_ALLOWED` | **Optional** `cloud:account` allowlist (e.g. `aws:1234567890,auth0:your-tenant`) — a multi-account *hardening* guardrail, not a per-resource list. The real boundary on a single-account deploy is the IAM role Asgard runs under; leave this unset and it provisions into the ambient account. Set it to constrain which cloud accounts Asgard may target when it can assume into several. First entry is the default target. | — |
 | `ASGARD_AUTO_APPROVE_CEILINGS` | Per-classification monthly self-service ceilings, `classification=usd` comma list, e.g. `poc=500,light-operational=2500,wide-operational=10000,critical-path=25000`. A request whose project-total infra stays under its tier's ceiling auto-approves; above it routes to human review. Merged per-tier onto the defaults. | poc=500, light-op=2500, wide-op=10000, critical-path=25000 |
