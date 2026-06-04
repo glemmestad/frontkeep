@@ -1,3 +1,10 @@
+# [0.6.0](https://github.com/glemmestad/asgard/compare/v0.5.2...v0.6.0) (2026-06-04)
+
+
+### Features
+
+* add an MCP catalog for publishing and sharing MCP servers ([#17](https://github.com/glemmestad/asgard/issues/17)) ([23387eb](https://github.com/glemmestad/asgard/commit/23387eb71ce5af465ee72d687c8b60898bc0a243))
+
 ## [0.5.2](https://github.com/glemmestad/asgard/compare/v0.5.1...v0.5.2) (2026-06-04)
 
 
