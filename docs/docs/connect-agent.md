@@ -143,6 +143,13 @@ The flow the [agent seed](./onboarding-loop.md) encodes, all as MCP tool calls:
 4. **`list_services` / `request_resource`** — discover what you can provision
    (storage, secrets, an Auth0 app, an inference gateway, …) and request it;
    self-service types provision immediately, review-tier types await approval.
+   **`list_resources`** shows what the project already has (id, type, state,
+   outputs). To let one resource reach another — say an `ecs-service` that must
+   read an `s3-bucket` or `dynamodb-table` — call **`request_grant`** with the two
+   ids and a level (defaults to `write` = read+write). The grant is itself a
+   provision request: same-project only, filed and audited like any other, with
+   the binding owned by the target's manifest, so a new target kind needs no core
+   change. Your own project's grants are self-service.
 5. **`gateway_credential`** — mint the project's LLM virtual key, then call models
    **out-of-band** (see below). Handing you a credential is control plane; using
    it is not.
