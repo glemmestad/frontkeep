@@ -1,3 +1,10 @@
+## [0.4.2](https://github.com/glemmestad/asgard/compare/v0.4.1...v0.4.2) (2026-06-04)
+
+
+### Bug Fixes
+
+* serve docs at /docs and expand the getting-started flow ([#11](https://github.com/glemmestad/asgard/issues/11)) ([6254fad](https://github.com/glemmestad/asgard/commit/6254fad05df86d27681f872c4c91073c899938c6))
+
 ## [0.4.1](https://github.com/glemmestad/asgard/compare/v0.4.0...v0.4.1) (2026-06-04)
 
 
