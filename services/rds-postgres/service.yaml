@@ -12,6 +12,12 @@ provisioner:
   config:
     module: aws/rds-postgres
     cloud: aws
+    # Operator network defaults, sourced from env so the agent never supplies
+    # them. Unset vars are dropped and the module falls back to the default VPC.
+    defaults:
+      region: "${ASGARD_AWS_DEFAULT_REGION}"
+      subnet_group_name: "${ASGARD_AWS_SUBNET_GROUP}"
+      vpc_security_group_ids: "${ASGARD_AWS_SECURITY_GROUP_IDS:csv}"
 secret_outputs: [master_password, connection_url]
 cost:
   model: usage
