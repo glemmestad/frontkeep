@@ -1,3 +1,10 @@
+# [0.7.0](https://github.com/glemmestad/asgard/compare/v0.6.0...v0.7.0) (2026-06-04)
+
+
+### Features
+
+* **provision:** first-class cross-resource access grants ([#18](https://github.com/glemmestad/asgard/issues/18)) ([a37fa77](https://github.com/glemmestad/asgard/commit/a37fa77af30cbcf8e3baf0d3a1eb593317599bd8))
+
 # [0.6.0](https://github.com/glemmestad/asgard/compare/v0.5.2...v0.6.0) (2026-06-04)
 
 
