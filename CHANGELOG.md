@@ -1,3 +1,11 @@
+# [0.4.0](https://github.com/glemmestad/asgard/compare/v0.3.0...v0.4.0) (2026-06-04)
+
+
+### Features
+
+* coordinate replicas with DB leases so concurrent writes are safe ([#8](https://github.com/glemmestad/asgard/issues/8)) ([a3ffadb](https://github.com/glemmestad/asgard/commit/a3ffadb6374468355be99e8061df0d380605eea1))
+* **ui:** default to light theme and reuse existing PATs ([#9](https://github.com/glemmestad/asgard/issues/9)) ([57af8df](https://github.com/glemmestad/asgard/commit/57af8df8aff9736d569c259b40ad5d4c87bf4f1e))
+
 # [0.3.0](https://github.com/glemmestad/asgard/compare/v0.2.1...v0.3.0) (2026-06-04)
 
 
