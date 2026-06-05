@@ -1,3 +1,10 @@
+## [0.8.3](https://github.com/glemmestad/asgard/compare/v0.8.2...v0.8.3) (2026-06-05)
+
+
+### Bug Fixes
+
+* getting-started — real one-call repo bootstrap + LLM-key example ([#23](https://github.com/glemmestad/asgard/issues/23)) ([6480120](https://github.com/glemmestad/asgard/commit/6480120f0be4d8ae46a6586ed4a3794ec6731688))
+
 ## [0.8.2](https://github.com/glemmestad/asgard/compare/v0.8.1...v0.8.2) (2026-06-05)
 
 
