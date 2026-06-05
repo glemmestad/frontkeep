@@ -192,7 +192,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/projects/{id}/resources/{rid}",
-            delete(deprovision_resource),
+            get(get_resource).delete(deprovision_resource),
         )
         .route("/api/projects/{id}/secrets", get(list_project_secrets))
         .route(
@@ -1678,6 +1678,25 @@ async fn list_resources(
     Ok(Json(serde_json::to_value(resources).unwrap_or_default()))
 }
 
+/// One resource by id (for polling an async provision/destroy to its terminal
+/// state). Returns `state` (`provisioning`/`provisioned`/`failed`/`destroying`/
+/// `destroyed`/`destroy_failed`), `outputs`, and `error`. Scoped to the project.
+async fn get_resource(
+    State(st): State<AppState>,
+    Path((project_id, rid)): Path<(String, String)>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let rec = st
+        .provision
+        .repo()
+        .get(&rid)
+        .await?
+        .ok_or_else(|| ApiError::NotFound(format!("resource {rid}")))?;
+    if rec.project_id != project_id {
+        return Err(ApiError::NotFound(format!("resource {rid}")));
+    }
+    Ok(Json(serde_json::to_value(rec).unwrap_or_default()))
+}
+
 #[derive(Deserialize)]
 struct DeprovisionQuery {
     #[serde(default = "default_actor")]
@@ -1815,11 +1834,22 @@ async fn approve_request(
     Json(b): Json<ActionBody>,
 ) -> Result<Json<asgard_workflow::WorkflowRequest>, ApiError> {
     require_cap(&st, &headers, asgard_identity::Capability::ApproveRequests).await?;
-    Ok(Json(
-        st.workflow
-            .approve(&id, &b.actor, b.reason.as_deref())
-            .await?,
-    ))
+    let approved = st
+        .workflow
+        .approve(&id, &b.actor, b.reason.as_deref())
+        .await?;
+    // Approval joins the deployment queue automatically — no separate "provision
+    // now" step. The resource enqueues; the returned request reflects the post-
+    // enqueue state (Fulfilled if it completed within the inline budget, else
+    // Approved while the apply runs in the background).
+    if approved.kind.starts_with("provision:") && approved.state == WfState::Approved {
+        let outcome = st
+            .provision
+            .fulfill(&st.workflow, &st.registry, &id, &b.actor)
+            .await?;
+        return Ok(Json(outcome.request));
+    }
+    Ok(Json(approved))
 }
 
 async fn reject_request(

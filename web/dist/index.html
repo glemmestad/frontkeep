@@ -2008,7 +2008,7 @@
       const facet = (k, l) => `<button data-af="${k}" style="padding:4px 11px;border-radius:999px;border:1px solid ${view === k ? 'var(--teal)' : 'var(--line)'};background:${view === k ? 'var(--teal)' : 'transparent'};color:${view === k ? '#04201d' : 'var(--fg)'};cursor:pointer;font-size:12px;font-weight:${view === k ? 700 : 400}">${esc(l)}</button>`;
       const actor = () => meEmail || 'admin';
       v.innerHTML = `<h1 class="pagehead">Approvals</h1>
-        <p class="pagesub">The exception queue. In-policy requests (within budget, at an auto-approvable classification) provision without stopping here — only the residue lands: over budget, above the self-service tier, or credential-minting. Approve, then provision.</p>
+        <p class="pagesub">The exception queue. In-policy requests (within budget, at an auto-approvable classification) provision without stopping here — only the residue lands: over budget, above the self-service tier, or credential-minting. Approve and the resource joins the deployment queue automatically.</p>
         <div class="row" id="af" style="gap:6px;margin-bottom:14px;flex-wrap:wrap">${FACETS.map(([k, l]) => facet(k, l)).join('')}</div>
         <div id="rows">${loading('Loading requests…')}</div>`;
       const wireFacets = () => v.querySelectorAll('[data-af]').forEach(b => b.onclick = () => { view = b.dataset.af; v.querySelector('#af').innerHTML = FACETS.map(([k, l]) => facet(k, l)).join(''); wireFacets(); run(); });
@@ -2024,7 +2024,9 @@
             const acts = r.state === 'requested'
               ? `<button class="act" data-approve="${esc(r.id)}">Approve</button><button class="act" data-reject="${esc(r.id)}" style="background:var(--chip);color:var(--fg);border:1px solid var(--line2)">Reject</button>`
               : r.state === 'approved'
-                ? `<button class="act" data-fulfill="${esc(r.id)}">${r.kind.startsWith('provision') ? 'Provision now' : 'Apply'}</button>`
+                ? (r.kind.startsWith('provision')
+                    ? `<span class="muted" style="font-size:12px">Deploying…</span>`
+                    : `<button class="act" data-fulfill="${esc(r.id)}">Apply</button>`)
                 : '';
             return `<div class="card" style="margin-bottom:10px">
               <div class="row" style="justify-content:space-between;align-items:flex-start">
