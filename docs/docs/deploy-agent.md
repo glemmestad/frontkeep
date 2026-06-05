@@ -126,10 +126,19 @@ Container-first (no config file) — set on the Asgard process (the image bundle
 ```bash
 ASGARD_TF_MODULES_DIR=/modules
 ASGARD_TF_WORK_DIR=/data/asgard-tf      # scratch only; can be ephemeral
-ASGARD_TF_ALLOWED=auth0:your-tenant
+ASGARD_TF_ALLOWED=auth0:your-tenant     # OPTIONAL multi-account guardrail
+
+# AWS resources (region + account are AWS-wide; subnet/SG are RDS placement):
+AWS_DEFAULT_REGION=us-west-2            # standard provider env — all AWS modules
+ASGARD_AWS_DEFAULT_ACCOUNT=123456789012 # default target + attribution account
+ASGARD_RDS_SUBNET_GROUP=my-db-subnets   # RDS-only; omit → default VPC
+ASGARD_RDS_SECURITY_GROUP_IDS=sg-123,sg-456
 AUTH0_DOMAIN=... AUTH0_CLIENT_ID=... AUTH0_CLIENT_SECRET=...   # M2M provider creds
 ```
-Or via `asgard.yaml` when you want the other provisioning knobs in one place:
+Region and account are **AWS-wide** (every AWS module uses them); `ASGARD_RDS_*`
+are RDS-only network placement. AWS provider creds come from the IAM role/instance
+profile Asgard runs under. Or via `asgard.yaml` when you want the other
+provisioning knobs in one place:
 ```yaml
 provisioning:
   terraform: { modules_dir: /modules, work_dir: /data/asgard-tf }
