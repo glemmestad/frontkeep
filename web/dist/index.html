@@ -485,11 +485,11 @@
 
     const tabs = {
       start:    { label: 'Getting started', ic: '✦', render: renderGettingStarted },
-      catalog:  { label: 'Catalog', ic: '▦', render: renderCatalog },
+      catalog:  { label: 'Service Catalog', ic: '▦', render: renderCatalog },
       guidance: { label: 'Guidance', ic: '◰', render: renderGuidance },
       recipes:  { label: 'Recipes', ic: '⧉', render: renderRecipes },
-      mcp:      { label: 'MCP Catalog', ic: '⧇', render: renderMcpCatalog },
       standards:{ label: 'Standards', ic: '§', render: renderStandards },
+      mcp:      { label: 'MCP Catalog', ic: '⧇', render: renderMcpCatalog },
       projects: { label: 'Projects', ic: '◧', render: renderProjects },
       approvals:{ label: 'Approvals', ic: '✔', render: renderApprovals, need: 'admin' },
       costdash: { label: 'Cost dashboard', ic: '◴', render: renderCostDash, full: true },
@@ -539,6 +539,9 @@
       const c = esc(code);
       return `<div class="snip"><button class="cp" data-cp="${c}">copy</button>${c}</div>`;
     };
+    // Plain-English instruction you say to your connected agent (it maps it to the
+    // right MCP tools) — deliberately not a tool-call/JSON snippet, which no human types.
+    const say = (t) => `<div style="border-left:2px solid var(--teal);margin:6px 0;padding:3px 0 3px 12px;font-style:italic;font-size:13px;color:var(--fg)">“${esc(t)}”</div>`;
     function wireCopy(root) {
       root.querySelectorAll('.cp').forEach(b => b.onclick = async () => {
         try { await navigator.clipboard.writeText(b.dataset.cp); const t = b.textContent; b.textContent = 'copied'; setTimeout(()=>b.textContent=t, 1200); }
@@ -623,8 +626,9 @@
         <h3>Open a repo and bootstrap it</h3>
         <p class="muted" style="margin:0 0 6px;font-size:13px">${SYS_NAME} is a <strong>starting point for a repo</strong>. Create a new one (or open an existing one) and initialize git:</p>
         ${snip('mkdir my-app && cd my-app && git init')}
-        <p class="muted" style="margin:10px 0 6px;font-size:13px">Then tell your connected agent to run <code>bootstrap</code> — <strong>one MCP call</strong> that returns <code>AGENTS.md</code> plus the minimal coding + security standards (<code>.agent/</code>) matched to your repo's languages, every file's body inlined. The agent writes them, then registers below.</p>
-        ${snip('bootstrap { "languages": ["python"], "task": "summarize support tickets" }')}
+        <p class="muted" style="margin:10px 0 6px;font-size:13px">Then just tell your connected agent to set the repo up — in plain English, e.g.:</p>
+        ${say("Bootstrap this repo on Asgard and register the project — it's a Python service that summarizes support tickets.")}
+        <p class="muted" style="margin:6px 0 0;font-size:13px">Behind the scenes it's <strong>one call</strong> that returns <code>AGENTS.md</code> plus the minimal coding + security standards (<code>.agent/</code>) matched to your repo's languages, every file inlined. The agent writes them, then registers below.</p>
         <p class="muted" style="margin:10px 0 0;font-size:12px"><code>AGENTS.md</code> is the entry point both people and agents read: the four moves (examine → learn standards → register → build), how to discover and <code>request_resource</code> what the project needs, and how to call models through the gateway. The live standards over MCP are the source of truth; the <code>.agent/</code> files are the offline mirror.</p>
       </div></div></div>
       <div class="card"><div class="step"><div class="n">4</div><div class="b">
@@ -643,18 +647,18 @@
       </div></div></div>
       <div class="card"><div class="step"><div class="n">5</div><div class="b">
         <h3>Provision what the project needs</h3>
-        <p class="muted" style="margin:0 0 6px;font-size:13px">Your agent provisions by calling <code>request_resource</code>. Auto-approvable services (like object storage) provision immediately; cost-bearing ones (databases, load-balanced services) route to a manager for approval. A first, safe one — a private, versioned bucket for permanent file storage:</p>
-        ${snip('request_resource s3-bucket { "name": "project-files" }')}
-        <p class="muted" style="margin:12px 0 4px;font-size:13px">Need your <strong>application</strong> to call a model (summarize a doc, score a transaction)? Mint the project's LLM key with <code>gateway_credential</code>, then call the gateway's OpenAI-compatible endpoint with it:</p>
-        ${snip('gateway_credential { "project_id": "proj-2026-0001" }')}
-        <p class="muted" style="margin:8px 0 4px;font-size:12px">Returns a project-scoped key (shown once). Your deployed app sends it as a bearer token to <code>POST /api/gateway/chat</code> — spend, policy, and audit all land on this project.</p>
+        <p class="muted" style="margin:0 0 6px;font-size:13px">You provision by asking your agent — again, in plain English. Auto-approvable services (like object storage) provision immediately; cost-bearing ones (databases, load-balanced services) route to a manager for approval. A first, safe one — a private, versioned bucket for permanent file storage:</p>
+        ${say("Provision a private, versioned storage bucket called project-files for this project.")}
+        <p class="muted" style="margin:12px 0 4px;font-size:13px">Need your <strong>application</strong> to call a model (summarize a doc, score a transaction)? Ask for the project's LLM key:</p>
+        ${say("Mint this project's gateway key so the app can call models through Asgard.")}
+        <p class="muted" style="margin:8px 0 4px;font-size:12px">You get a project-scoped key back (shown once). Your deployed app sends it as a bearer token to <code>POST /api/gateway/chat</code> — spend, policy, and audit all land on this project.</p>
         <div class="card" style="border-color:var(--amber);margin:6px 0 0;padding:12px">
           <p style="margin:0 0 4px;font-weight:700;color:var(--amber)">⚠ The LLM key is for app inference — not your dev tools</p>
           <p class="muted" style="margin:0;font-size:12px">It exists so your <strong>deployed app</strong> can query a model through the governed gateway (budget, policy, guardrails, audit, kill switch — all attributed to this project). It is <strong>not</strong> a general key for your coding assistant or ad-hoc chat; your agent already talks to ${SYS_NAME}'s control plane over MCP and doesn't use it. Mint it when the product itself needs inference.</p>
         </div>
         <p class="muted" style="margin:10px 0 0;font-size:12px">Whether that call lands on the built-in OpenAI/Anthropic floor or an enterprise LiteLLM/Databricks backend is the operator's choice — your code is identical either way. Browse everything you can provision in the catalog, and watch spend land per-project on the Cost tab.</p>
         <div class="row" style="margin-top:10px">
-          <button class="act" id="gs-cat">Browse the catalog</button>
+          <button class="act" id="gs-cat">Browse the service catalog</button>
           <button class="act" id="gs-cost" style="background:var(--chip);color:var(--fg);border:1px solid var(--line)">View cost</button>
         </div>
       </div></div></div>
@@ -1573,17 +1577,29 @@
 
     async function renderCatalog() {
       const v = document.getElementById('view');
-      v.innerHTML = `<h1 class="pagehead">Catalog</h1>
+      v.innerHTML = `<h1 class="pagehead">Service Catalog</h1>
         <p class="pagesub">Everything your agents can provision — services and the connectors behind them. Each is governed: cost-attributed, classification-gated, and audited.</p>
         <div class="row" style="margin-bottom:4px"><input id="q" placeholder="filter by name, category, tag…" style="flex:1;max-width:360px" /></div>
         <div id="results">${loading('Loading services…')}</div>`;
+      // Display label per category (only LLM is renamed) and the order categories
+      // render in — AI first, then alphabetical by display name.
+      const catName = (c) => (c === 'llm' ? 'AI' : c);
+      const catOrder = (a, b) => (a === 'llm' ? -1 : b === 'llm' ? 1 : catName(a).localeCompare(catName(b)));
+      // Cost: a flat/usage estimate when there is one, "Scales with usage" for
+      // metered services with no fixed monthly (LLMs, per-call), else free.
+      const costLabel = (s) => {
+        const c = s.cost || {};
+        if (c.model === 'free') return 'No cost';
+        const est = Number(c.estimated_monthly_usd || 0);
+        if (est > 0) return '~' + money(est) + '/mo';
+        return (c.model || 'usage') === 'usage' ? 'Scales with usage' : 'No cost';
+      };
       let all = [];
       try { all = await api('/api/services'); }
       catch (e) { document.getElementById('results').innerHTML = errBanner(e); return; }
       const card = (s) => {
         const conn = s.provisioner && s.provisioner.connector;
         const connLabel = KNOWN_CONNECTORS.includes(conn) ? conn : 'custom';
-        const cost = Number((s.cost && s.cost.estimated_monthly_usd) || 0);
         const range = [s.classification_min, s.classification_max].filter(Boolean).join(' → ');
         return `<div class="pcard">
           <div class="ph">
@@ -1593,10 +1609,10 @@
             </div>
             <div>${s.auto_approvable?pill('self-serve','teal'):pill('review','amber')}</div>
           </div>
-          <div class="meta">${pill(s.category,'blue')} ${pill(connLabel, connLabel==='custom'?'purple':'')}
+          <div class="meta">${pill(catName(s.category),'blue')} ${pill(connLabel, connLabel==='custom'?'purple':'')}
             ${range?`<span class="muted" style="font-size:12px">${esc(range)}</span>`:''}</div>
           <p class="muted" style="font-size:12px;margin:8px 0 0;line-height:1.5">${esc((s.description||'').slice(0,160))}</p>
-          <div class="cap num" style="margin-top:10px">${cost>0?'~'+money(cost)+'/mo':'no usage cost'}</div>
+          <div class="cap num" style="margin-top:10px">${esc(costLabel(s))}</div>
         </div>`;
       };
       const render = (list) => {
@@ -1604,14 +1620,14 @@
         if (!list.length) { out.innerHTML = empty('No services match.'); return; }
         const cats = {};
         list.forEach(s => (cats[s.category] = cats[s.category] || []).push(s));
-        out.innerHTML = Object.keys(cats).sort().map(cat =>
-          `<h3 style="margin:18px 0 8px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">${esc(cat)} · ${cats[cat].length}</h3>
+        out.innerHTML = Object.keys(cats).sort(catOrder).map(cat =>
+          `<h3 style="margin:18px 0 8px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">${esc(catName(cat))} · ${cats[cat].length}</h3>
            <div class="grid2">${cats[cat].map(card).join('')}</div>`).join('');
       };
       const apply = () => {
         const q = document.getElementById('q').value.trim().toLowerCase();
         render(!q ? all : all.filter(s =>
-          (s.id+' '+s.name+' '+s.category+' '+((s.tags||[]).join(' '))+' '+(s.description||'')).toLowerCase().includes(q)));
+          (s.id+' '+s.name+' '+s.category+' '+catName(s.category)+' '+((s.tags||[]).join(' '))+' '+(s.description||'')).toLowerCase().includes(q)));
       };
       document.getElementById('q').oninput = apply;
       apply();
