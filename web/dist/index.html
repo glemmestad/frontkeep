@@ -485,11 +485,11 @@
 
     const tabs = {
       start:    { label: 'Getting started', ic: '✦', render: renderGettingStarted },
-      catalog:  { label: 'Catalog', ic: '▦', render: renderCatalog },
+      catalog:  { label: 'Service Catalog', ic: '▦', render: renderCatalog },
       guidance: { label: 'Guidance', ic: '◰', render: renderGuidance },
       recipes:  { label: 'Recipes', ic: '⧉', render: renderRecipes },
-      mcp:      { label: 'MCP Catalog', ic: '⧇', render: renderMcpCatalog },
       standards:{ label: 'Standards', ic: '§', render: renderStandards },
+      mcp:      { label: 'MCP Catalog', ic: '⧇', render: renderMcpCatalog },
       projects: { label: 'Projects', ic: '◧', render: renderProjects },
       approvals:{ label: 'Approvals', ic: '✔', render: renderApprovals, need: 'admin' },
       costdash: { label: 'Cost dashboard', ic: '◴', render: renderCostDash, full: true },
@@ -658,7 +658,7 @@
         </div>
         <p class="muted" style="margin:10px 0 0;font-size:12px">Whether that call lands on the built-in OpenAI/Anthropic floor or an enterprise LiteLLM/Databricks backend is the operator's choice — your code is identical either way. Browse everything you can provision in the catalog, and watch spend land per-project on the Cost tab.</p>
         <div class="row" style="margin-top:10px">
-          <button class="act" id="gs-cat">Browse the catalog</button>
+          <button class="act" id="gs-cat">Browse the service catalog</button>
           <button class="act" id="gs-cost" style="background:var(--chip);color:var(--fg);border:1px solid var(--line)">View cost</button>
         </div>
       </div></div></div>
@@ -1577,17 +1577,29 @@
 
     async function renderCatalog() {
       const v = document.getElementById('view');
-      v.innerHTML = `<h1 class="pagehead">Catalog</h1>
+      v.innerHTML = `<h1 class="pagehead">Service Catalog</h1>
         <p class="pagesub">Everything your agents can provision — services and the connectors behind them. Each is governed: cost-attributed, classification-gated, and audited.</p>
         <div class="row" style="margin-bottom:4px"><input id="q" placeholder="filter by name, category, tag…" style="flex:1;max-width:360px" /></div>
         <div id="results">${loading('Loading services…')}</div>`;
+      // Display label per category (only LLM is renamed) and the order categories
+      // render in — AI first, then alphabetical by display name.
+      const catName = (c) => (c === 'llm' ? 'AI' : c);
+      const catOrder = (a, b) => (a === 'llm' ? -1 : b === 'llm' ? 1 : catName(a).localeCompare(catName(b)));
+      // Cost: a flat/usage estimate when there is one, "Scales with usage" for
+      // metered services with no fixed monthly (LLMs, per-call), else free.
+      const costLabel = (s) => {
+        const c = s.cost || {};
+        if (c.model === 'free') return 'No cost';
+        const est = Number(c.estimated_monthly_usd || 0);
+        if (est > 0) return '~' + money(est) + '/mo';
+        return (c.model || 'usage') === 'usage' ? 'Scales with usage' : 'No cost';
+      };
       let all = [];
       try { all = await api('/api/services'); }
       catch (e) { document.getElementById('results').innerHTML = errBanner(e); return; }
       const card = (s) => {
         const conn = s.provisioner && s.provisioner.connector;
         const connLabel = KNOWN_CONNECTORS.includes(conn) ? conn : 'custom';
-        const cost = Number((s.cost && s.cost.estimated_monthly_usd) || 0);
         const range = [s.classification_min, s.classification_max].filter(Boolean).join(' → ');
         return `<div class="pcard">
           <div class="ph">
@@ -1597,10 +1609,10 @@
             </div>
             <div>${s.auto_approvable?pill('self-serve','teal'):pill('review','amber')}</div>
           </div>
-          <div class="meta">${pill(s.category,'blue')} ${pill(connLabel, connLabel==='custom'?'purple':'')}
+          <div class="meta">${pill(catName(s.category),'blue')} ${pill(connLabel, connLabel==='custom'?'purple':'')}
             ${range?`<span class="muted" style="font-size:12px">${esc(range)}</span>`:''}</div>
           <p class="muted" style="font-size:12px;margin:8px 0 0;line-height:1.5">${esc((s.description||'').slice(0,160))}</p>
-          <div class="cap num" style="margin-top:10px">${cost>0?'~'+money(cost)+'/mo':'no usage cost'}</div>
+          <div class="cap num" style="margin-top:10px">${esc(costLabel(s))}</div>
         </div>`;
       };
       const render = (list) => {
@@ -1608,14 +1620,14 @@
         if (!list.length) { out.innerHTML = empty('No services match.'); return; }
         const cats = {};
         list.forEach(s => (cats[s.category] = cats[s.category] || []).push(s));
-        out.innerHTML = Object.keys(cats).sort().map(cat =>
-          `<h3 style="margin:18px 0 8px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">${esc(cat)} · ${cats[cat].length}</h3>
+        out.innerHTML = Object.keys(cats).sort(catOrder).map(cat =>
+          `<h3 style="margin:18px 0 8px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">${esc(catName(cat))} · ${cats[cat].length}</h3>
            <div class="grid2">${cats[cat].map(card).join('')}</div>`).join('');
       };
       const apply = () => {
         const q = document.getElementById('q').value.trim().toLowerCase();
         render(!q ? all : all.filter(s =>
-          (s.id+' '+s.name+' '+s.category+' '+((s.tags||[]).join(' '))+' '+(s.description||'')).toLowerCase().includes(q)));
+          (s.id+' '+s.name+' '+s.category+' '+catName(s.category)+' '+((s.tags||[]).join(' '))+' '+(s.description||'')).toLowerCase().includes(q)));
       };
       document.getElementById('q').oninput = apply;
       apply();
