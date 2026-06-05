@@ -1,3 +1,10 @@
+# [0.10.0](https://github.com/glemmestad/asgard/compare/v0.9.1...v0.10.0) (2026-06-05)
+
+
+### Features
+
+* **provision:** async, crash-safe provisioning and deprovisioning ([#27](https://github.com/glemmestad/asgard/issues/27)) ([6c07ee6](https://github.com/glemmestad/asgard/commit/6c07ee64d39add6fff089a246ed55a77320ef7fe))
+
 ## [0.9.1](https://github.com/glemmestad/asgard/compare/v0.9.0...v0.9.1) (2026-06-05)
 
 
