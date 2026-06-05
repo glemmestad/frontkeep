@@ -1,3 +1,10 @@
+## [0.8.2](https://github.com/glemmestad/asgard/compare/v0.8.1...v0.8.2) (2026-06-05)
+
+
+### Bug Fixes
+
+* **provision:** AWS-wide default region + account, RDS-specific subnet/SG ([#22](https://github.com/glemmestad/asgard/issues/22)) ([5d1040b](https://github.com/glemmestad/asgard/commit/5d1040b1cd1802af2f4d0d4643d643be42d5f265))
+
 ## [0.8.1](https://github.com/glemmestad/asgard/compare/v0.8.0...v0.8.1) (2026-06-04)
 
 
