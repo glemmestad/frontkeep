@@ -1,3 +1,10 @@
+## [0.9.1](https://github.com/glemmestad/asgard/compare/v0.9.0...v0.9.1) (2026-06-05)
+
+
+### Bug Fixes
+
+* **provision:** thread resolved region into ecs-service awslogs driver ([#26](https://github.com/glemmestad/asgard/issues/26)) ([b800d7f](https://github.com/glemmestad/asgard/commit/b800d7f3eb4c707cef0cdf5fb62db4ac0d102c84))
+
 # [0.9.0](https://github.com/glemmestad/asgard/compare/v0.8.4...v0.9.0) (2026-06-05)
 
 
