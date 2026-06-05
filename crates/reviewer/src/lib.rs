@@ -70,6 +70,11 @@ pub struct ReviewVerdict {
     pub confidence: f64,
     pub model: String,
     pub cost_usd: f64,
+    /// Repo files the reviewer actually opened to reach this verdict — the read
+    /// provenance (empty for reviewers that read no files, e.g. `llm-judge`).
+    /// Persisted in `verdict_json` so an auditor can see what the AI inspected.
+    #[serde(default)]
+    pub files_read: Vec<String>,
 }
 
 impl ReviewVerdict {
@@ -83,6 +88,7 @@ impl ReviewVerdict {
             confidence,
             model,
             cost_usd: cost,
+            files_read: Vec::new(),
         }
     }
 
@@ -97,7 +103,14 @@ impl ReviewVerdict {
             confidence: 0.0,
             model: String::new(),
             cost_usd: 0.0,
+            files_read: Vec::new(),
         }
+    }
+
+    /// Attach the read provenance (the files the reviewer opened) to a verdict.
+    pub(crate) fn with_files_read(mut self, files: Vec<String>) -> Self {
+        self.files_read = files;
+        self
     }
 
     pub(crate) fn concern(
@@ -118,6 +131,7 @@ impl ReviewVerdict {
             confidence,
             model,
             cost_usd: cost,
+            files_read: Vec::new(),
         }
     }
 }

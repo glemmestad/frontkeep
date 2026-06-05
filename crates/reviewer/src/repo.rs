@@ -9,6 +9,10 @@ use crate::ReviewError;
 
 const MAX_FILES: usize = 4000;
 const MAX_FILE_BYTES: usize = 80_000;
+/// GitLab tree pagination: page size and a hard page cap (bounds API calls on a
+/// huge monorepo — `MAX_TREE_PAGES * PER_PAGE` entries scanned at most).
+const PER_PAGE: usize = 100;
+const MAX_TREE_PAGES: usize = 50;
 
 /// Where (and how) to read a repo's files from.
 enum Backend {
@@ -143,16 +147,28 @@ impl RepoReader {
             #[serde(rename = "type")]
             kind: String,
         }
-        let url = format!(
-            "{api_base}/projects/{}/repository/tree?recursive=true&per_page=100&ref={git_ref}",
-            enc(project)
-        );
-        let entries: Vec<Entry> = send_json(gl_auth(self.client.get(&url), token)).await?;
-        Ok(entries
-            .into_iter()
-            .filter(|e| e.kind == "blob")
-            .map(|e| e.path)
-            .collect())
+        // GitLab paginates the tree (100/page max). Walk pages until a short page or
+        // the file cap — a single page would let us review only the first 100 entries
+        // of the repo, which produces confidently-wrong "X is missing" findings.
+        let mut out = Vec::new();
+        for page in 1..=MAX_TREE_PAGES {
+            let url = format!(
+                "{api_base}/projects/{}/repository/tree?recursive=true&per_page={PER_PAGE}&page={page}&ref={git_ref}",
+                enc(project)
+            );
+            let entries: Vec<Entry> = send_json(gl_auth(self.client.get(&url), token)).await?;
+            let got = entries.len();
+            out.extend(
+                entries
+                    .into_iter()
+                    .filter(|e| e.kind == "blob")
+                    .map(|e| e.path),
+            );
+            if got < PER_PAGE || out.len() >= MAX_FILES {
+                break;
+            }
+        }
+        Ok(out)
     }
 
     async fn gitlab_raw(&self, path: &str) -> Result<String, ReviewError> {

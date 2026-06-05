@@ -15,15 +15,25 @@ use asgard_gateway::{run_tool_loop, Gateway, ToolDef, ToolExecutor};
 
 use crate::manifest::ReviewerManifest;
 use crate::repo::RepoReader;
-use crate::{
-    extract_json, verdict_from_reply, ReviewError, ReviewRequest, ReviewVerdict, Reviewer,
-};
+use crate::{extract_json, ReviewError, ReviewRequest, ReviewVerdict, Reviewer};
 
 const REVIEW_QUESTION: &str =
-    "Review this repository against the standards above. Use list_files then read_file to inspect \
-     the code you need. Reply with ONE JSON object and nothing else: \
-     {\"disposition\":\"pass\"|\"concern\",\"findings\":[\"...\"],\"confidence\":0.0-1.0}. \
-     Use \"concern\" only for concrete, fixable violations of the standards.";
+    "Decide whether this repository is safe and accountable enough to promote to the target tier. \
+     You MUST read file CONTENTS with read_file before judging — the listing alone is NOT evidence. \
+     Reply with ONE JSON object and nothing else: \
+     {\"disposition\":\"pass\"|\"concern\",\
+     \"findings\":[{\"file\":\"<exact path you read>\",\"issue\":\"<the material problem>\"}],\
+     \"confidence\":0.0-1.0}. \
+     This is a governance PROMOTION GATE, not a style linter. Raise \"concern\" ONLY for a \
+     SIGNIFICANT, material risk to operating this as a service at the target tier that you verified \
+     inside a file you actually read — for example: secrets/credentials committed in code; a \
+     security hole (injection, auth bypass, unsafe deserialization); an unhandled failure on a \
+     critical path; no tests at all for core behavior; a data-loss or irreversible-action risk. \
+     Do NOT raise findings for formatting, line length, import order, naming, comment/docstring \
+     style, lint or type-checker configuration, or which dependency group a tool sits in — those \
+     are not promotion risks. Every finding's `file` MUST be a file you opened with read_file; omit \
+     anything you did not verify. When in doubt, pass. No significant verified risk → return \
+     \"pass\" with an empty findings list.";
 
 /// How hard to look, per target tier. `skip` tiers run no code review.
 #[derive(Debug, Clone)]
@@ -196,6 +206,68 @@ async fn stub_verdict(
     }
 }
 
+/// Parse the code reviewer's structured reply and keep only findings about files it
+/// actually read — a finding citing an unread file is unverified speculation and is
+/// dropped (the model tends to over-generalize from a couple of files to the whole
+/// repo). A concern left with no grounded finding is downgraded to a non-blocking
+/// pass: the gate never blocks on a violation the reviewer didn't verify in a file
+/// it opened.
+fn grounded_verdict(
+    m: &ReviewerManifest,
+    obj: &Value,
+    files_read: &[String],
+    cost: f64,
+) -> ReviewVerdict {
+    let read: std::collections::HashSet<&str> = files_read.iter().map(String::as_str).collect();
+    let confidence = obj
+        .get("confidence")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.5);
+    let grounded: Vec<String> = obj
+        .get("findings")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|f| {
+                    let file = f.get("file").and_then(|v| v.as_str())?;
+                    let issue = f.get("issue").and_then(|v| v.as_str())?;
+                    read.contains(file).then(|| format!("{file}: {issue}"))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let disposition = obj
+        .get("disposition")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let is_concern = matches!(disposition.as_str(), "concern" | "fail" | "block");
+
+    if is_concern && !grounded.is_empty() {
+        let signal = format!("{}: {}", m.id, grounded.join("; "));
+        ReviewVerdict::concern(
+            &m.id,
+            "code-review",
+            grounded,
+            signal,
+            confidence,
+            m.model.clone(),
+            cost,
+        )
+        .with_files_read(files_read.to_vec())
+    } else {
+        // Pass: the reviewer passed, or every "finding" cited a file it never opened
+        // (unverified — not a promotion blocker).
+        let mut v = ReviewVerdict::pass(&m.id, "code-review", confidence, m.model.clone(), cost);
+        if is_concern {
+            v.findings = vec![
+                "reviewer raised only findings about files it did not read — none verified".into(),
+            ];
+        }
+        v.with_files_read(files_read.to_vec())
+    }
+}
+
 #[async_trait]
 impl Reviewer for CodeReview {
     fn kind(&self) -> &str {
@@ -238,12 +310,18 @@ impl Reviewer for CodeReview {
         }
 
         let grounding = format!(
-            "You are a governance code reviewer for a promotion to the '{}' tier. Judge the \
-             repository strictly against these standards:\n{}",
+            "You are a governance reviewer deciding whether this repository is safe and accountable \
+             enough to promote to the '{}' tier. Use the standards below as your reference, but a \
+             promotion gate is about MATERIAL risk, not style compliance — weigh anything you find \
+             by its real operational impact at this tier, and let cosmetic/style deviations \
+             pass:\n{}",
             req.target,
             self.gather_standards(&depth).await
         );
-        let tools = CodeReviewTools { reader };
+        let tools = CodeReviewTools {
+            reader,
+            read_paths: std::sync::Mutex::new(Vec::new()),
+        };
         let key = self.system_key.as_deref().unwrap_or_default();
         match run_tool_loop(
             &self.gateway,
@@ -254,11 +332,15 @@ impl Reviewer for CodeReview {
             REVIEW_QUESTION,
             &tools,
             depth.max_rounds,
+            Some("read_file"),
         )
         .await
         {
-            Ok(answer) => Ok(match extract_json(&answer) {
-                Some(o) => verdict_from_reply(&m.id, "code-review", &o, m.model.clone(), 0.0),
+            Ok(outcome) => Ok(match extract_json(&outcome.answer) {
+                Some(o) => {
+                    let files_read = tools.read_paths.lock().unwrap().clone();
+                    grounded_verdict(m, &o, &files_read, outcome.cost_usd)
+                }
                 None => {
                     ReviewVerdict::abstain(&m.id, "code-review", "reviewer produced no verdict")
                 }
@@ -279,6 +361,10 @@ impl Reviewer for CodeReview {
 
 struct CodeReviewTools {
     reader: RepoReader,
+    /// Files the model actually opened (read provenance). A `concern` with none is
+    /// unverified speculation (see the downgrade in `review`); the list is also
+    /// attached to the verdict for audit.
+    read_paths: std::sync::Mutex<Vec<String>>,
 }
 
 #[async_trait]
@@ -318,6 +404,7 @@ impl ToolExecutor for CodeReviewTools {
                     .read_file(path)
                     .await
                     .map_err(|e| e.to_string())?;
+                self.read_paths.lock().unwrap().push(path.to_string());
                 Ok(json!({ "path": path, "content": body }).to_string())
             }
             other => Err(format!("unknown tool: {other}")),
@@ -391,5 +478,45 @@ mod tests {
         assert!(d.for_tier("poc").skip);
         assert_eq!(d.for_tier("light-operational").standard_ids, vec!["coding"]);
         assert_eq!(d.for_tier("critical-path").standard_ids.len(), 3);
+    }
+
+    #[test]
+    fn grounded_verdict_keeps_only_findings_about_read_files() {
+        let m = manifest();
+        let read = vec!["pyproject.toml".to_string()];
+
+        // A concern mixing a read-file finding with an unread-file finding keeps only
+        // the grounded one.
+        let reply = serde_json::json!({
+            "disposition": "concern",
+            "findings": [
+                {"file": "pyproject.toml", "issue": "secret committed"},
+                {"file": "src/never_opened.py", "issue": "made-up issue"}
+            ],
+            "confidence": 0.8
+        });
+        let v = grounded_verdict(&m, &reply, &read, 0.02);
+        assert_eq!(v.disposition, Disposition::Concern);
+        assert_eq!(v.findings, vec!["pyproject.toml: secret committed"]);
+        assert_eq!(v.add_exception_signals.len(), 1);
+        assert_eq!(v.files_read, read);
+        assert!((v.cost_usd - 0.02).abs() < 1e-9);
+    }
+
+    #[test]
+    fn grounded_verdict_downgrades_all_unread_concern_to_pass() {
+        let m = manifest();
+        let read = vec!["pyproject.toml".to_string()];
+        // Every finding cites a file the reviewer never opened → unverified → the
+        // concern is downgraded to a non-blocking pass (no exception signal).
+        let reply = serde_json::json!({
+            "disposition": "concern",
+            "findings": [{"file": "src/axon.py", "issue": "speculated"}],
+            "confidence": 0.9
+        });
+        let v = grounded_verdict(&m, &reply, &read, 0.0);
+        assert_eq!(v.disposition, Disposition::Pass);
+        assert!(v.add_exception_signals.is_empty());
+        assert_eq!(v.files_read, read);
     }
 }

@@ -105,6 +105,7 @@ fn deterministic(
             cost_usd: 0.0,
             reviewer_id: id.into(),
             kind: "llm-judge".into(),
+            files_read: Vec::new(),
         }
     }
 }
