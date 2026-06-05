@@ -539,6 +539,9 @@
       const c = esc(code);
       return `<div class="snip"><button class="cp" data-cp="${c}">copy</button>${c}</div>`;
     };
+    // Plain-English instruction you say to your connected agent (it maps it to the
+    // right MCP tools) — deliberately not a tool-call/JSON snippet, which no human types.
+    const say = (t) => `<div style="border-left:2px solid var(--teal);margin:6px 0;padding:3px 0 3px 12px;font-style:italic;font-size:13px;color:var(--fg)">“${esc(t)}”</div>`;
     function wireCopy(root) {
       root.querySelectorAll('.cp').forEach(b => b.onclick = async () => {
         try { await navigator.clipboard.writeText(b.dataset.cp); const t = b.textContent; b.textContent = 'copied'; setTimeout(()=>b.textContent=t, 1200); }
@@ -623,8 +626,9 @@
         <h3>Open a repo and bootstrap it</h3>
         <p class="muted" style="margin:0 0 6px;font-size:13px">${SYS_NAME} is a <strong>starting point for a repo</strong>. Create a new one (or open an existing one) and initialize git:</p>
         ${snip('mkdir my-app && cd my-app && git init')}
-        <p class="muted" style="margin:10px 0 6px;font-size:13px">Then tell your connected agent to run <code>bootstrap</code> — <strong>one MCP call</strong> that returns <code>AGENTS.md</code> plus the minimal coding + security standards (<code>.agent/</code>) matched to your repo's languages, every file's body inlined. The agent writes them, then registers below.</p>
-        ${snip('bootstrap { "languages": ["python"], "task": "summarize support tickets" }')}
+        <p class="muted" style="margin:10px 0 6px;font-size:13px">Then just tell your connected agent to set the repo up — in plain English, e.g.:</p>
+        ${say("Bootstrap this repo on Asgard and register the project — it's a Python service that summarizes support tickets.")}
+        <p class="muted" style="margin:6px 0 0;font-size:13px">Behind the scenes it's <strong>one call</strong> that returns <code>AGENTS.md</code> plus the minimal coding + security standards (<code>.agent/</code>) matched to your repo's languages, every file inlined. The agent writes them, then registers below.</p>
         <p class="muted" style="margin:10px 0 0;font-size:12px"><code>AGENTS.md</code> is the entry point both people and agents read: the four moves (examine → learn standards → register → build), how to discover and <code>request_resource</code> what the project needs, and how to call models through the gateway. The live standards over MCP are the source of truth; the <code>.agent/</code> files are the offline mirror.</p>
       </div></div></div>
       <div class="card"><div class="step"><div class="n">4</div><div class="b">
@@ -643,11 +647,11 @@
       </div></div></div>
       <div class="card"><div class="step"><div class="n">5</div><div class="b">
         <h3>Provision what the project needs</h3>
-        <p class="muted" style="margin:0 0 6px;font-size:13px">Your agent provisions by calling <code>request_resource</code>. Auto-approvable services (like object storage) provision immediately; cost-bearing ones (databases, load-balanced services) route to a manager for approval. A first, safe one — a private, versioned bucket for permanent file storage:</p>
-        ${snip('request_resource s3-bucket { "name": "project-files" }')}
-        <p class="muted" style="margin:12px 0 4px;font-size:13px">Need your <strong>application</strong> to call a model (summarize a doc, score a transaction)? Mint the project's LLM key with <code>gateway_credential</code>, then call the gateway's OpenAI-compatible endpoint with it:</p>
-        ${snip('gateway_credential { "project_id": "proj-2026-0001" }')}
-        <p class="muted" style="margin:8px 0 4px;font-size:12px">Returns a project-scoped key (shown once). Your deployed app sends it as a bearer token to <code>POST /api/gateway/chat</code> — spend, policy, and audit all land on this project.</p>
+        <p class="muted" style="margin:0 0 6px;font-size:13px">You provision by asking your agent — again, in plain English. Auto-approvable services (like object storage) provision immediately; cost-bearing ones (databases, load-balanced services) route to a manager for approval. A first, safe one — a private, versioned bucket for permanent file storage:</p>
+        ${say("Provision a private, versioned storage bucket called project-files for this project.")}
+        <p class="muted" style="margin:12px 0 4px;font-size:13px">Need your <strong>application</strong> to call a model (summarize a doc, score a transaction)? Ask for the project's LLM key:</p>
+        ${say("Mint this project's gateway key so the app can call models through Asgard.")}
+        <p class="muted" style="margin:8px 0 4px;font-size:12px">You get a project-scoped key back (shown once). Your deployed app sends it as a bearer token to <code>POST /api/gateway/chat</code> — spend, policy, and audit all land on this project.</p>
         <div class="card" style="border-color:var(--amber);margin:6px 0 0;padding:12px">
           <p style="margin:0 0 4px;font-weight:700;color:var(--amber)">⚠ The LLM key is for app inference — not your dev tools</p>
           <p class="muted" style="margin:0;font-size:12px">It exists so your <strong>deployed app</strong> can query a model through the governed gateway (budget, policy, guardrails, audit, kill switch — all attributed to this project). It is <strong>not</strong> a general key for your coding assistant or ad-hoc chat; your agent already talks to ${SYS_NAME}'s control plane over MCP and doesn't use it. Mint it when the product itself needs inference.</p>
