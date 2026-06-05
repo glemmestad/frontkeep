@@ -189,6 +189,15 @@ struct Config {
     sources: Vec<SourceCfg>,
     #[serde(default)]
     reconcile_secs: Option<u64>,
+    /// Seconds a fast provision request waits inline for its apply before
+    /// returning the `provisioning` record to poll. Absent = 5. `long_running`
+    /// services ignore it and return immediately.
+    #[serde(default)]
+    provision_wait_secs: Option<u64>,
+    /// How often the provisioning reconciler re-drives orphaned/stale work-state
+    /// rows and enqueues approved-but-recordless requests. Absent = 60.
+    #[serde(default)]
+    provision_reconcile_secs: Option<u64>,
     /// Lease TTL (seconds) for cross-instance coordination — the leader-leased
     /// background loops and the per-resource Terraform lock. Absent = 600. Only
     /// relevant when running more than one replica (Postgres).
@@ -587,7 +596,12 @@ async fn serve(database_url: &str, bind: &str, config_path: Option<PathBuf>) -> 
     .with_governance_config(build_governance_config(&config));
     let lease_ttl = config.lease_ttl_secs.unwrap_or(600) as i64;
     let leases = Leases::new(core.db.clone(), asgard_storage::new_uid());
-    let provision = build_provision(core.db.clone(), &config, Some((leases.clone(), lease_ttl)));
+    let mut provision =
+        build_provision(core.db.clone(), &config, Some((leases.clone(), lease_ttl)));
+    provision.set_workflow(workflow.clone());
+    if let Some(secs) = config.provision_wait_secs {
+        provision.set_wait_budget_secs(secs);
+    }
     maybe_seed_admin(&core.identity).await;
     if let Err(e) = registry.seed_knowledge().await {
         tracing::warn!("seeding starter guidance/recipes failed: {e}");
@@ -749,6 +763,37 @@ async fn serve(database_url: &str, bind: &str, config_path: Option<PathBuf>) -> 
         });
     }
 
+    // Periodic provisioning reconciler: re-drive orphaned/stale apply + destroy
+    // work and enqueue approved-but-recordless requests, so a dropped call, crash,
+    // or redeploy can't leave a resource un-provisioned or untracked. Work-then-
+    // sleep so leftover work heals on startup. Leader-leased to one replica.
+    {
+        let prov = state.provision.clone();
+        let reg = state.registry.clone();
+        let wf = state.workflow.clone();
+        let secs = config.provision_reconcile_secs.unwrap_or(60).max(5);
+        let lease = leases.clone();
+        tokio::spawn(async move {
+            loop {
+                if lease
+                    .try_acquire("loop:provision-reconcile", lease_ttl)
+                    .await
+                    .unwrap_or(false)
+                {
+                    match prov.reconcile(wf.as_ref(), &reg).await {
+                        Ok(n) if n > 0 => {
+                            tracing::info!("provision reconcile: drove {n} work item(s)")
+                        }
+                        Ok(_) => {}
+                        Err(e) => tracing::warn!("provision reconcile failed: {e}"),
+                    }
+                    let _ = lease.release("loop:provision-reconcile").await;
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
+            }
+        });
+    }
+
     // Mount the MCP server (Streamable HTTP at /mcp, gated by project virtual
     // key) alongside the REST/GraphQL/UI surface — same process, same port.
     let mcp_router = asgard_mcp::http_router(
@@ -831,7 +876,8 @@ async fn run_mcp(database_url: &str, config_path: Option<PathBuf>) -> anyhow::Re
     .with_requirements(build_requirements(&config))
     .with_review_config(build_review_config(&config))
     .with_governance_config(build_governance_config(&config));
-    let provision = build_provision(core.db.clone(), &config, None);
+    let mut provision = build_provision(core.db.clone(), &config, None);
+    provision.set_workflow(workflow.clone());
     let project = std::env::var("ASGARD_PROJECT").ok();
     let server = asgard_mcp::AsgardMcp::new(
         core.catalog,

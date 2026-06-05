@@ -310,6 +310,12 @@ pub struct ListResourcesArgs {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct GetResourceArgs {
+    /// The resource id from a request_resource outcome or list_resources.
+    pub resource_id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct PromotionArgs {
     /// Target project (required on a user token; omit on a project key).
     pub project_id: Option<String>,
@@ -1519,7 +1525,7 @@ impl AsgardMcp {
     }
 
     #[tool(
-        description = "Request an infrastructure resource for a registered project (e.g. s3-bucket, dynamodb-table, random-secret). Self-service types provision immediately; review-tier types await approval."
+        description = "Request an infrastructure resource for a registered project (e.g. s3-bucket, dynamodb-table, random-secret). Self-service types provision immediately; review-tier types await approval (and deploy automatically once approved). Fast resources return a `provisioned` record; slow ones (RDS/ALB/ECS) return a `provisioning` record — poll get_resource with its id until state is `provisioned` or `failed`."
     )]
     async fn request_resource(
         &self,
@@ -1567,6 +1573,43 @@ impl AsgardMcp {
             Err(e) => return deny(e),
         };
         wrap(self.do_list_resources(&pid, a.state.as_deref()).await)
+    }
+
+    #[tool(
+        description = "Fetch one provisioned resource by id — poll this to follow an async provision or teardown to its terminal state. Returns state (provisioning → provisioned/failed, or destroying → destroyed/destroy_failed), outputs, and error. Use after request_resource returns a `provisioning` record (slow services like RDS/ALB/ECS provision in the background)."
+    )]
+    async fn get_resource(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(a): Parameters<GetResourceArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        // Same scoping as deprovision: the resource id is not a cross-project
+        // handle — it must belong to a project the caller is authorized for.
+        let rec = match self.provision.repo().get(&a.resource_id).await {
+            Ok(Some(r)) => r,
+            Ok(None) => return deny(format!("resource {} not found", a.resource_id)),
+            Err(e) => return deny(e.to_string()),
+        };
+        match Self::auth(&ctx) {
+            Some(McpAuth::User { email, role }) => {
+                if let Err(e) = self.authorize_user(&email, &role, &rec.project_id).await {
+                    return deny(e);
+                }
+            }
+            Some(McpAuth::Project { project_id }) => {
+                if rec.project_id != project_id {
+                    return deny(format!("resource {} not found", a.resource_id));
+                }
+            }
+            None => {
+                if let Some(scope) = &self.default_project {
+                    if &rec.project_id != scope {
+                        return deny(format!("resource {} not found", a.resource_id));
+                    }
+                }
+            }
+        }
+        wrap(Ok(serde_json::to_string(&rec).unwrap_or_default()))
     }
 
     #[tool(
@@ -1979,7 +2022,8 @@ mod tests {
         );
         registry.seed_knowledge().await.unwrap();
         let workflow = Arc::new(WorkflowEngine::new(db.clone(), policy));
-        let provision = ProvisionService::new(ProvisionRepo::new(db));
+        let mut provision = ProvisionService::new(ProvisionRepo::new(db));
+        provision.set_workflow(workflow.clone());
         AsgardMcp::new(catalog, gw, registry, workflow, provision, default_project)
     }
 

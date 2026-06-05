@@ -380,6 +380,12 @@ RID=$(jget "$WORK/res.json" "['provisioned']['id']")
 [[ "$RS" == "fulfilled" ]] && ok "self-service resource auto-provisions (fulfilled)" || bad "expected fulfilled, got $RS"
 [[ "$RT" == "$PID" ]] && ok "provisioned resource tagged project=$PID" || bad "resource not project-tagged ($RT)"
 
+# 11a. Single-resource read: poll one resource by id (the async provision/destroy
+# status surface). The s3 bucket is fast, so it is already provisioned.
+curl -fsS "$BASE/api/projects/${PID}/resources/${RID}" -o "$WORK/res_get.json"
+GS=$(jget "$WORK/res_get.json" "['state']")
+[[ "$GS" == "provisioned" ]] && ok "get_resource returns one resource by id (state=provisioned)" || bad "expected provisioned, got $GS"
+
 # 11b. Deprovision: tear the resource down (connector destroy + record marked).
 curl -fsS -X DELETE "$BASE/api/projects/${PID}/resources/${RID}" -o "$WORK/deprov.json"
 DS=$(jget "$WORK/deprov.json" "['state']")
@@ -396,6 +402,17 @@ curl -fsS -X POST "$BASE/api/projects/${PID}/resources" -H 'content-type: applic
   -o "$WORK/res2.json"
 PA=$(jget "$WORK/res2.json" "['pending_approval']")
 [[ "$PA" == "False" ]] && ok "cost-bearing rds-postgres self-services within the ceiling" || bad "rds-postgres should self-serve ($PA)"
+# rds-postgres is long_running: the request returns a `provisioning` record
+# immediately and the apply finishes in the background. Poll it to terminal.
+R2ID=$(jget "$WORK/res2.json" "['provisioned']['id']")
+R2ST=""
+for _ in $(seq 1 20); do
+  curl -fsS "$BASE/api/projects/${PID}/resources/${R2ID}" -o "$WORK/res2_get.json"
+  R2ST=$(jget "$WORK/res2_get.json" "['state']")
+  [[ "$R2ST" == "provisioned" ]] && break
+  sleep 1
+done
+[[ "$R2ST" == "provisioned" ]] && ok "long-running rds-postgres converges to provisioned (async)" || bad "rds-postgres did not converge ($R2ST)"
 
 # 12a. Per-project LiteLLM key: a governed credential. Parks for approval
 # (auto_approvable:false), then approve+fulfill drives the full request lifecycle.

@@ -93,6 +93,12 @@ pub struct ServiceManifest {
     /// Must match the target's `grant.principal_kind`.
     #[serde(default)]
     pub principal_kind: Option<String>,
+    /// Latency hint only: when true, a provision request returns its `provisioning`
+    /// record immediately instead of waiting the inline budget for completion (the
+    /// apply runs in the background either way). Set on slow services (RDS, ALB,
+    /// ECS). Never a correctness lever — the durability is the same regardless.
+    #[serde(default)]
+    pub long_running: bool,
 }
 
 /// How a grant against a target resource is bound. `module` is the connector
