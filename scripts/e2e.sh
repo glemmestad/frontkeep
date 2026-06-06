@@ -908,6 +908,45 @@ curl -s -o "$WORK/pskcat.out" -X POST "$BASE2/mcp" -H "authorization: Bearer $PA
 grep -q 'finn@corp.example' "$WORK/pskcat.out" && grep -q '\\"status\\":\\"community\\"' "$WORK/pskcat.out" \
   && ok "PAT skills_catalog_publish stamps the user as owner and lists it user-submitted" || { bad "PAT skill publish wrong"; cat "$WORK/pskcat.out"; }
 
+# 20h. The CLI binary is a PAT-authed MCP client — same token, same tools, parity
+# by construction — plus things the agent surface can't do (write seed files,
+# inference). Driven against the enforcing server with finn's real PAT. A scoped
+# config keeps the key cache inside $WORK (hermetic).
+export ASGARD_CONFIG="$WORK/cli-config.toml"
+"$BIN" --url "$BASE2" --pat "$PAT" -o json tools >"$WORK/cli_tools.json" 2>/dev/null
+grep -q '"list_projects"' "$WORK/cli_tools.json" && grep -q '"register_project"' "$WORK/cli_tools.json" \
+  && ok "CLI lists the live tool surface (incl. the new list_projects)" || { bad "CLI tools missing expected tools"; head -c 400 "$WORK/cli_tools.json"; }
+
+"$BIN" --url "$BASE2" --pat "$PAT" -o json project ls >"$WORK/cli_ls.json" 2>/dev/null
+grep -q "$PAGENT_PID" "$WORK/cli_ls.json" \
+  && ok "CLI project ls (list_projects) returns finn's owned project, owner-scoped" || { bad "CLI project ls missing $PAGENT_PID"; head -c 400 "$WORK/cli_ls.json"; }
+
+"$BIN" --url "$BASE2" --pat "$PAT" -o json project credential "$PAGENT_PID" >"$WORK/cli_cred.json" 2>/dev/null
+grep -q '"key"' "$WORK/cli_cred.json" \
+  && ok "CLI mints the project gateway key (project credential)" || { bad "CLI credential failed"; cat "$WORK/cli_cred.json"; }
+
+"$BIN" --url "$BASE2" --pat "$PAT" call governance_metrics >"$WORK/cli_gov.out" 2>/dev/null
+grep -q 'operational' "$WORK/cli_gov.out" \
+  && ok "CLI generic call reaches any tool (governance_metrics)" || { bad "CLI call governance_metrics failed"; head -c 200 "$WORK/cli_gov.out"; }
+
+# Go further #1: write the agent-seed to disk in one command (the MCP only returns bodies).
+mkdir -p "$WORK/cli_repo"
+"$BIN" --url "$BASE2" --pat "$PAT" seed apply --languages rust --task "build a service" --write --dir "$WORK/cli_repo" >/dev/null 2>&1
+[[ -f "$WORK/cli_repo/AGENTS.md" ]] \
+  && ok "CLI seed apply --write creates the repo seed on disk (beyond the MCP surface)" || bad "CLI seed apply did not write AGENTS.md"
+
+# Go further #2: real inference — the CLI mints the project key and calls the gateway.
+"$BIN" --url "$BASE2" --pat "$PAT" -o json chat --project "$PAGENT_PID" --model model:default/mock --message "hello cli" >"$WORK/cli_chat.json" 2>/dev/null
+grep -q 'echo' "$WORK/cli_chat.json" \
+  && ok "CLI chat runs inference via an auto-minted key (beyond the MCP surface)" || { bad "CLI chat failed"; cat "$WORK/cli_chat.json"; }
+
+# A bad PAT fails fast with exit code 3 and the server's actionable hint on stderr.
+"$BIN" --url "$BASE2" --pat "asg_pat_bogus" call governance_metrics >/dev/null 2>"$WORK/cli_bad.err"
+CLI_RC=$?
+{ [[ "$CLI_RC" == "3" ]] && grep -qi 'mint' "$WORK/cli_bad.err"; } \
+  && ok "CLI bad-PAT exits 3 and echoes the mint-a-PAT hint" || { bad "CLI bad-PAT handling wrong (rc=$CLI_RC)"; cat "$WORK/cli_bad.err"; }
+unset ASGARD_CONFIG
+
 # Readiness probe reports DB reachable.
 curl -fsS "$BASE2/readyz" >/dev/null 2>&1 && ok "readiness probe (/readyz) is green" || bad "/readyz not green"
 kill "$SERVER2_PID" 2>/dev/null

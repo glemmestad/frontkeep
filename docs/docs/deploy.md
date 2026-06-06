@@ -68,6 +68,14 @@ The image bundles `terraform` on `PATH` and the provisioning modules at `/module
 so an armed deployment needs no extra mounts. (Running your own fork/registry?
 Substitute your image path — nothing in Asgard hard-codes `ghcr.io/glemmestad`.)
 
+### Native binary
+
+The same release also publishes static macOS/Linux binaries — the quickest way to
+run `asgard serve` (or the [CLI](./cli.md)) without Docker. See
+[Install](./install.md). Armed provisioning then needs `terraform` on your `PATH`
+(the binary ships only itself); SQLite + the control plane work with no extra
+dependencies.
+
 ## Prerequisites
 
 - A host that can run the binary (or the container). **That's it — nothing else is

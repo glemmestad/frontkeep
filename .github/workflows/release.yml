@@ -67,3 +67,45 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # Native install path: cross-build the single `asgard` binary (server + CLI) for
+  # macOS and Linux and attach versionless tarballs + checksums to the release
+  # semantic-release already created. Gated on `published` and pinned to the
+  # version-bumped tag — same contract as the image job above, so it fires despite
+  # the `[skip ci]` bump commit (do NOT convert this to an `on: push: tags`
+  # trigger: token-pushed tags don't re-fire workflows and `[skip ci]` would skip
+  # it). Linux is musl → fully static, portable binaries. `scripts/install.sh`
+  # resolves the right tarball from `releases/latest/download/`.
+  binaries:
+    needs: release
+    if: needs.release.outputs.published == 'true'
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.release.outputs.version }}
+      - uses: taiki-e/upload-rust-binary-action@v1
+        with:
+          bin: asgard
+          target: ${{ matrix.target }}
+          # Versionless names so `releases/latest/download/asgard-<target>.tar.gz`
+          # is a stable URL for the installer.
+          archive: asgard-$target
+          tar: all
+          checksum: sha256
+          ref: refs/tags/v${{ needs.release.outputs.version }}
+          token: ${{ secrets.GITHUB_TOKEN }}

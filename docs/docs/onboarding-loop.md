@@ -52,7 +52,7 @@ groups:
 Every gateway call is attributed to its project, and the owner / manager / group / cost-center / classification are denormalized onto each usage event at write time — so cost rolls up by any of them with a single query, and historical spend stays attributed to who owned the project when the cost was incurred.
 
 ```bash
-asgard project cost --by group       # or: project | owner | manager | classification | model | provider
+asgard cost report --by group        # or: project | owner | manager | classification | model | provider
 # REST:  GET /api/cost?by=group
 # MCP:   cost_report { "by": "group" }
 ```

@@ -38,18 +38,18 @@ cargo run -p asgard -- serve --database-url sqlite://asgard.db
 # (set ASGARD_DEV_INSECURE=1 to skip auth on loopback while exploring)
 ```
 
-Then connect an agent to the **MCP front door** — the Getting Started tab in the UI mints a Personal Access Token and shows the exact snippet for Claude Code, Codex, and Cursor. Or drive it from the CLI:
+Then connect an agent to the **MCP front door** — the Getting Started tab in the UI mints a Personal Access Token and shows the exact snippet for Claude Code, Codex, and Cursor. Or drive it from the CLI — the same binary, [installed](docs/docs/install.md) and authenticated with that same PAT (`asgard login`, or `ASGARD_PAT`/`ASGARD_URL`):
 
 ```sh
 asgard project register --name "My Service" --owner you@corp.example \
   --manager you@corp.example --group platform --classification poc   # the gate; mints proj-YYYY-NNNN
-asgard gateway login --project proj-2026-0001                        # get the project's virtual key
-asgard catalog ls                                                    # what exists
-asgard project cost --by group                                       # spend rolled up by dimension
+asgard project credential proj-2026-0001                             # mint the project's gateway key
+asgard catalog services                                              # what's provisionable
+asgard cost report --by group                                        # spend rolled up by dimension
 asgard validate services/s3-bucket/service.yaml                      # offline manifest check
 ```
 
-See [`docs/docs/`](docs/docs/) for the [onboarding loop](docs/docs/onboarding-loop.md), [connecting an agent](docs/docs/connect-agent.md), [deploying Asgard](docs/docs/deploy.md), [inference backends](docs/docs/inference-backends.md), and the [architecture](docs/docs/architecture.md).
+See [`docs/docs/`](docs/docs/) for [installing the CLI](docs/docs/install.md), [using the CLI](docs/docs/cli.md), the [onboarding loop](docs/docs/onboarding-loop.md), [connecting an agent](docs/docs/connect-agent.md), [deploying Asgard](docs/docs/deploy.md), [inference backends](docs/docs/inference-backends.md), and the [architecture](docs/docs/architecture.md).
 
 ## Status
 

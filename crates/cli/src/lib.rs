@@ -1,186 +1,53 @@
-//! CLI client logic (brief §4 surfaces, §6.11). Thin HTTP client against the
-//! running server plus local helpers (config scaffold, template scaffold, and
-//! offline manifest validation). The `asgard` binary owns the clap tree and
-//! dispatches into these functions.
+//! CLI client logic. The control-plane surface is a PAT-authenticated MCP client
+//! over `/mcp` (`mcp`), with profile config (`config`), output rendering
+//! (`render`), and the inference path (`chat`). The offline helpers below
+//! (config scaffold, template scaffold, manifest validation) need no server.
+//! The `asgard` binary owns the clap tree and dispatches into these.
 
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
-
 use asgard_catalog::{Manifest, SchemaRegistry};
+
+pub mod chat;
+pub mod config;
+pub mod mcp;
+pub mod render;
+pub mod seed;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CliError {
     #[error("http: {0}")]
     Http(String),
+    #[error("mcp: {0}")]
+    Mcp(String),
+    #[error("authentication failed: {0}")]
+    Auth(String),
     #[error("server returned {status}: {body}")]
     Server { status: u16, body: String },
     #[error("io: {0}")]
     Io(String),
     #[error("yaml: {0}")]
     Yaml(String),
+    #[error("config: {0}")]
+    Config(String),
+    #[error("bad arguments: {0}")]
+    Args(String),
     #[error("validation failed:\n{0}")]
     Invalid(String),
     #[error("unknown template: {0}")]
     UnknownTemplate(String),
 }
 
-#[derive(Debug, Deserialize)]
-pub struct EntitySummary {
-    pub kind: String,
-    pub metadata: MetaSummary,
-    pub lifecycle: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct MetaSummary {
-    pub name: String,
-    pub namespace: String,
-    #[serde(default)]
-    pub title: Option<String>,
-}
-
-pub struct Client {
-    url: String,
-    token: Option<String>,
-    http: reqwest::Client,
-}
-
-impl Client {
-    pub fn new(url: impl Into<String>, token: Option<String>) -> Self {
-        Client {
-            url: url.into().trim_end_matches('/').to_string(),
-            token,
-            http: reqwest::Client::new(),
+impl CliError {
+    /// Stable process exit code: `3` for auth failures (so scripts can branch on
+    /// "need a new PAT"), `1` for everything else. Tool-level errors (the tool ran
+    /// but returned an error result) are mapped to `2` by the caller.
+    pub fn exit_code(&self) -> i32 {
+        match self {
+            CliError::Auth(_) | CliError::Server { status: 401, .. } => 3,
+            _ => 1,
         }
     }
-
-    fn auth(&self, rb: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-        match &self.token {
-            Some(t) => rb.bearer_auth(t),
-            None => rb,
-        }
-    }
-
-    pub async fn health(&self) -> Result<bool, CliError> {
-        let resp = self
-            .http
-            .get(format!("{}/healthz", self.url))
-            .send()
-            .await
-            .map_err(|e| CliError::Http(e.to_string()))?;
-        Ok(resp.status().is_success())
-    }
-
-    pub async fn catalog_ls(
-        &self,
-        kind: Option<&str>,
-        q: Option<&str>,
-    ) -> Result<Vec<EntitySummary>, CliError> {
-        let mut req = self.http.get(format!("{}/api/catalog/entities", self.url));
-        if let Some(k) = kind {
-            req = req.query(&[("kind", k)]);
-        }
-        if let Some(query) = q {
-            req = req.query(&[("q", query)]);
-        }
-        let resp = self
-            .auth(req)
-            .send()
-            .await
-            .map_err(|e| CliError::Http(e.to_string()))?;
-        decode(resp).await
-    }
-
-    /// Mint a per-project virtual key.
-    pub async fn gateway_login(&self, project: &str) -> Result<serde_json::Value, CliError> {
-        let resp = self
-            .auth(
-                self.http
-                    .post(format!("{}/api/projects/{}/keys", self.url, project))
-                    .json(&serde_json::json!({ "name": "cli" })),
-            )
-            .send()
-            .await
-            .map_err(|e| CliError::Http(e.to_string()))?;
-        decode(resp).await
-    }
-
-    /// Register a project (the mandatory gate). Returns the minted record.
-    pub async fn register_project(
-        &self,
-        body: serde_json::Value,
-    ) -> Result<serde_json::Value, CliError> {
-        let resp = self
-            .auth(
-                self.http
-                    .post(format!("{}/api/projects", self.url))
-                    .json(&body),
-            )
-            .send()
-            .await
-            .map_err(|e| CliError::Http(e.to_string()))?;
-        decode(resp).await
-    }
-
-    pub async fn list_projects(&self) -> Result<serde_json::Value, CliError> {
-        let resp = self
-            .auth(self.http.get(format!("{}/api/projects", self.url)))
-            .send()
-            .await
-            .map_err(|e| CliError::Http(e.to_string()))?;
-        decode(resp).await
-    }
-
-    /// Cost rolled up by a dimension (project|owner|manager|group|...).
-    pub async fn cost(&self, by: &str) -> Result<serde_json::Value, CliError> {
-        let resp = self
-            .auth(
-                self.http
-                    .get(format!("{}/api/cost", self.url))
-                    .query(&[("by", by)]),
-            )
-            .send()
-            .await
-            .map_err(|e| CliError::Http(e.to_string()))?;
-        decode(resp).await
-    }
-
-    /// File a request (request → approval → fulfillment).
-    pub async fn submit_request(
-        &self,
-        kind: &str,
-        requester: &str,
-        subject: &str,
-        payload: serde_json::Value,
-    ) -> Result<serde_json::Value, CliError> {
-        let resp =
-            self.auth(self.http.post(format!("{}/api/requests", self.url)).json(
-                &serde_json::json!({
-                    "kind": kind,
-                    "requester": requester,
-                    "subject": subject,
-                    "payload": payload,
-                }),
-            ))
-            .send()
-            .await
-            .map_err(|e| CliError::Http(e.to_string()))?;
-        decode(resp).await
-    }
-}
-
-async fn decode<T: serde::de::DeserializeOwned>(resp: reqwest::Response) -> Result<T, CliError> {
-    let status = resp.status();
-    if !status.is_success() {
-        return Err(CliError::Server {
-            status: status.as_u16(),
-            body: resp.text().await.unwrap_or_default(),
-        });
-    }
-    resp.json::<T>()
-        .await
-        .map_err(|e| CliError::Http(e.to_string()))
 }
 
 /// Write a starter `asgard.yaml` config into `dir`.
