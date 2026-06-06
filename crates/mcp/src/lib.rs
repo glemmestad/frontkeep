@@ -660,6 +660,26 @@ impl AsgardMcp {
         }
     }
 
+    async fn do_list_projects(&self, auth: Option<McpAuth>) -> Result<String, String> {
+        let mut projects = self.registry.list().await.map_err(|e| e.to_string())?;
+        match auth {
+            Some(McpAuth::Project { project_id }) => {
+                projects.retain(|p| p.project_id == project_id)
+            }
+            Some(McpAuth::User { email, role }) => {
+                if !Role::parse(&role).can(asgard_identity::Capability::ViewAllCost) {
+                    projects.retain(|p| p.owner == email || p.manager == email);
+                }
+            }
+            None => {
+                if let Some(dp) = &self.default_project {
+                    projects.retain(|p| &p.project_id == dp);
+                }
+            }
+        }
+        Ok(serde_json::to_string(&projects).unwrap_or_default())
+    }
+
     async fn do_gateway_credential(&self, pid: &str) -> Result<String, String> {
         self.registry
             .require_active(pid)
@@ -1484,6 +1504,16 @@ impl AsgardMcp {
             Err(e) => return deny(e),
         };
         wrap(self.do_project_state(&pid).await)
+    }
+
+    #[tool(
+        description = "List the projects you can see: every project you own or manage (admin/finance see all). A project key returns just its own project. No arguments."
+    )]
+    async fn list_projects(
+        &self,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        wrap(self.do_list_projects(Self::auth(&ctx)).await)
     }
 
     #[tool(

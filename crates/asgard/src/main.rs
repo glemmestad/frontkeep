@@ -11,6 +11,7 @@ use axum::response::{IntoResponse, Response};
 use clap::{Parser, Subcommand};
 use rust_embed::RustEmbed;
 use serde::Deserialize;
+use serde_json::{json, Map, Value};
 
 use asgard_api::AppState;
 use asgard_catalog::{
@@ -40,6 +41,10 @@ use asgard_reviewer::{
 use asgard_storage::{leases::Leases, Db};
 use asgard_workflow::WorkflowEngine;
 
+use asgard_cli::config::Resolved;
+use asgard_cli::mcp::McpClient;
+use asgard_cli::render::{render, Output, Shape};
+
 #[derive(RustEmbed)]
 #[folder = "../../web/dist"]
 struct WebAssets;
@@ -57,9 +62,10 @@ struct DocsAssets;
 #[command(
     name = "asgard",
     version,
-    about = "Control plane for AI/agent development"
+    about = "Control plane for AI/agent development — server (serve/mcp) plus a PAT-authed CLI"
 )]
 struct Cli {
+    /// Database URL for the in-process server commands (`serve`, `mcp`).
     #[arg(
         long,
         env = "ASGARD_DATABASE_URL",
@@ -67,15 +73,20 @@ struct Cli {
         global = true
     )]
     database_url: String,
-    #[arg(
-        long,
-        env = "ASGARD_URL",
-        default_value = "http://localhost:8080",
-        global = true
-    )]
-    url: String,
-    #[arg(long, env = "ASGARD_TOKEN", global = true)]
-    token: Option<String>,
+    /// Asgard server origin for CLI commands (talks to `/mcp`). Falls back to the
+    /// selected profile, then `http://localhost:8080`.
+    #[arg(long, env = "ASGARD_URL", global = true)]
+    url: Option<String>,
+    /// User PAT (`asg_pat_…`) authenticating CLI commands. Falls back to the
+    /// selected profile. Mint one in the UI under "Get Started".
+    #[arg(long, env = "ASGARD_PAT", global = true)]
+    pat: Option<String>,
+    /// Config profile to use (see `asgard login`); defaults to the file's default.
+    #[arg(long, env = "ASGARD_PROFILE", global = true)]
+    profile: Option<String>,
+    /// Output format for CLI commands: json, table (default), or yaml.
+    #[arg(long, short = 'o', env = "ASGARD_OUTPUT", global = true)]
+    output: Option<String>,
     #[command(subcommand)]
     command: Cmd,
 }
@@ -96,47 +107,151 @@ enum Cmd {
     },
     /// Write a starter asgard.yaml into the current directory.
     Init,
-    /// Catalog client commands.
-    Catalog {
-        #[command(subcommand)]
-        cmd: CatalogCmd,
+    /// Save a server URL + PAT into a config profile (named by the global --profile).
+    Login {
+        /// Don't make the written profile the default.
+        #[arg(long)]
+        no_default: bool,
     },
-    /// Scaffold a golden-path agent template.
+    /// List every tool the server exposes (the live parity surface).
+    Tools,
+    /// Call any MCP tool by name — guarantees parity with the agent surface.
+    Call {
+        /// Tool name (see `asgard tools`).
+        tool: String,
+        /// Arguments as a JSON object ("-" reads stdin). Mutually exclusive with --arg.
+        #[arg(long, conflicts_with = "arg")]
+        json: Option<String>,
+        /// Repeated key=value args; each value is parsed as JSON if it parses, else a string.
+        #[arg(long = "arg", value_name = "KEY=VALUE")]
+        arg: Vec<String>,
+    },
+    /// Generate a shell completion script.
+    Completions {
+        /// Shell: bash, zsh, fish, powershell, or elvish.
+        shell: clap_complete::Shell,
+    },
+    /// Validate a manifest file against its schema (offline).
+    Validate { path: PathBuf },
+    /// Scaffold a golden-path agent template (offline).
     Agent {
         #[command(subcommand)]
         cmd: AgentCmd,
     },
-    /// Gateway client commands.
-    Gateway {
+    /// Service catalog + entity discovery.
+    Catalog {
         #[command(subcommand)]
-        cmd: GatewayCmd,
+        cmd: CatalogCmd,
     },
-    /// Project registration + cost (the governed onboarding gate).
+    /// Project registration, lifecycle, credentials, and promotion (the gate).
     Project {
         #[command(subcommand)]
         cmd: ProjectCmd,
     },
-    /// File an access request (request -> approval -> fulfillment).
-    Request {
+    /// Enterprise standards an agent's output must conform to.
+    Standards {
+        #[command(subcommand)]
+        cmd: StandardsCmd,
+    },
+    /// Governed how-to guidance docs.
+    Guidance {
+        #[command(subcommand)]
+        cmd: GuidanceCmd,
+    },
+    /// Narrated runbooks (recipes).
+    Recipe {
+        #[command(subcommand)]
+        cmd: RecipeCmd,
+    },
+    /// The published MCP-server catalog.
+    McpCatalog {
+        #[command(subcommand)]
+        cmd: McpCatalogCmd,
+    },
+    /// Cost + spend reporting.
+    Cost {
+        #[command(subcommand)]
+        cmd: CostCmd,
+    },
+    /// Org-wide governance / portfolio metrics.
+    Governance,
+    /// Infrastructure resources for a project.
+    Resource {
+        #[command(subcommand)]
+        cmd: ResourceCmd,
+    },
+    /// Project secrets.
+    Secret {
+        #[command(subcommand)]
+        cmd: SecretCmd,
+    },
+    /// Agent-seed modules (the standards files for a repo).
+    Seed {
+        #[command(subcommand)]
+        cmd: SeedCmd,
+    },
+    /// One-shot repo seed: AGENTS.md + standards (dry-run unless --write).
+    Bootstrap {
+        #[arg(long)]
+        languages: Vec<String>,
+        #[arg(long)]
+        task: Option<String>,
+        #[arg(long)]
+        tier: Option<String>,
+        /// Actually write the files (default: dry-run).
+        #[arg(long)]
+        write: bool,
+        /// Overwrite files that already exist.
+        #[arg(long)]
+        force: bool,
+        /// Destination directory (default: current directory).
+        #[arg(long)]
+        dir: Option<PathBuf>,
+    },
+    /// Run inference through a project's gateway key (minted/reused for you).
+    Chat {
+        #[arg(long)]
+        project: String,
         #[arg(long)]
         model: String,
-        #[arg(long, default_value = "internal")]
-        data_class: String,
-        #[arg(long, default_value = "user:default/cli")]
-        as_user: String,
+        #[arg(long)]
+        message: String,
+        #[arg(long)]
+        max_tokens: Option<u32>,
+        #[arg(long)]
+        temperature: Option<f32>,
+        #[arg(long)]
+        data_class: Option<String>,
     },
-    /// Validate a manifest file against its schema (offline).
-    Validate { path: PathBuf },
 }
 
 #[derive(Subcommand)]
 enum CatalogCmd {
-    Ls {
+    /// Search catalog entities.
+    Search {
         #[arg(long)]
         kind: Option<String>,
         #[arg(long)]
-        q: Option<String>,
+        query: Option<String>,
     },
+    /// Get one entity by kind/namespace/name.
+    Get {
+        #[arg(long)]
+        kind: String,
+        #[arg(long)]
+        namespace: Option<String>,
+        #[arg(long)]
+        name: String,
+    },
+    /// List provisionable services.
+    Services,
+    /// Show one service manifest by id.
+    Service {
+        #[arg(long)]
+        id: String,
+    },
+    /// List cost-center groups available for registration.
+    Groups,
 }
 
 #[derive(Subcommand)]
@@ -150,40 +265,303 @@ enum AgentCmd {
 }
 
 #[derive(Subcommand)]
-enum GatewayCmd {
-    Login {
-        #[arg(long)]
-        project: String,
-    },
-}
-
-#[derive(Subcommand)]
 enum ProjectCmd {
+    /// List the projects you own or manage.
+    Ls,
     /// Register a project; mints a stable proj-YYYY-NNNN id.
     Register {
         #[arg(long)]
         name: String,
-        #[arg(long)]
-        owner: String,
-        #[arg(long)]
-        manager: String,
-        #[arg(long)]
-        group: String,
-        #[arg(long, default_value = "poc")]
-        classification: String,
-        #[arg(long, default_value = "internal")]
-        data_class: String,
-        #[arg(long, default_value_t = 0.0)]
-        budget_usd: f64,
+        /// Owner email (ignored on a user PAT — stamped from the authenticated user).
         #[arg(long, default_value = "")]
-        description: String,
+        owner: String,
+        #[arg(long, default_value = "")]
+        manager: String,
+        #[arg(long, default_value = "")]
+        group: String,
+        #[arg(long)]
+        classification: Option<String>,
+        #[arg(long)]
+        data_class: Option<String>,
+        #[arg(long)]
+        budget_usd: Option<f64>,
+        #[arg(long)]
+        description: Option<String>,
     },
-    /// List registered projects.
+    /// Update a project's mutable fields (id never changes).
+    Update {
+        project_id: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long)]
+        budget_usd: Option<f64>,
+    },
+    /// Show a project's registration record.
+    Get { project_id: String },
+    /// Show a project's runtime state (budget, spend, kill switch).
+    State { project_id: String },
+    /// Mint the project's gateway LLM key.
+    Credential { project_id: String },
+    /// Show the promotion checklist.
+    Promotion { project_id: String },
+    /// Request a one-step promotion to the next tier.
+    Promote {
+        project_id: String,
+        #[arg(long)]
+        target: String,
+    },
+    /// Forward a flagged promotion request to a human.
+    Escalate {
+        #[arg(long)]
+        request_id: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum StandardsCmd {
+    /// List enterprise standard sets.
     Ls,
-    /// Show spend rolled up by a dimension (project|owner|manager|group|...).
-    Cost {
-        #[arg(long, default_value = "project")]
-        by: String,
+    /// Fetch the full text of a standard set.
+    Get { id: String },
+}
+
+#[derive(Subcommand)]
+enum GuidanceCmd {
+    /// List guidance docs.
+    Ls,
+    /// Fetch one guidance doc by slug.
+    Get { slug: String },
+    /// Create or update a guidance doc.
+    Put {
+        #[arg(long)]
+        title: String,
+        #[arg(long)]
+        body: String,
+        #[arg(long)]
+        slug: Option<String>,
+        #[arg(long)]
+        summary: Option<String>,
+        #[arg(long)]
+        category: Option<String>,
+        #[arg(long = "tag")]
+        tags: Vec<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum RecipeCmd {
+    /// List recipes.
+    Ls,
+    /// Fetch one recipe by slug.
+    Get { slug: String },
+    /// Create or update a recipe.
+    Put {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        body: String,
+        #[arg(long)]
+        slug: Option<String>,
+        #[arg(long)]
+        summary: Option<String>,
+        /// Optional machine-readable spec, as a JSON object.
+        #[arg(long)]
+        spec: Option<String>,
+        #[arg(long = "tag")]
+        tags: Vec<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum McpCatalogCmd {
+    /// List published MCP servers.
+    Ls,
+    /// Fetch one catalog entry by id.
+    Get { id: String },
+    /// Publish or update an MCP server entry.
+    Publish {
+        #[arg(long)]
+        name: String,
+        /// Provide to update an entry you own; omit to publish a new one.
+        #[arg(long)]
+        id: Option<String>,
+        #[arg(long)]
+        summary: Option<String>,
+        #[arg(long)]
+        readme: Option<String>,
+        /// Structured install spec, as a JSON object.
+        #[arg(long)]
+        install: Option<String>,
+        #[arg(long)]
+        repository: Option<String>,
+        #[arg(long)]
+        homepage: Option<String>,
+        #[arg(long)]
+        version: Option<String>,
+        #[arg(long = "tag")]
+        tags: Vec<String>,
+    },
+    /// Change an entry's lifecycle: active, disabled, or archived.
+    SetState {
+        #[arg(long)]
+        id: String,
+        #[arg(long)]
+        state: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum CostCmd {
+    /// Model/token spend by dimension.
+    Report {
+        #[arg(long)]
+        by: Option<String>,
+        #[arg(long)]
+        since: Option<String>,
+        #[arg(long)]
+        until: Option<String>,
+    },
+    /// Full cost for one project (model + infra).
+    Project {
+        project_id: String,
+        #[arg(long)]
+        start: Option<String>,
+        #[arg(long)]
+        end: Option<String>,
+    },
+    /// Daily rollup series for one project.
+    Series {
+        #[arg(long)]
+        project: String,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        until: Option<String>,
+    },
+    /// Rollup spend grouped by a dimension.
+    By {
+        #[arg(long)]
+        by: Option<String>,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        until: Option<String>,
+    },
+    /// Latest end-of-month forecast for a project.
+    Forecast { project_id: String },
+    /// Recent cost anomalies.
+    Anomalies {
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long)]
+        limit: Option<i64>,
+    },
+    /// Org cost tree for the month.
+    Tree {
+        #[arg(long)]
+        as_of: Option<String>,
+    },
+    /// Top movers vs the previous month.
+    Movers {
+        #[arg(long)]
+        as_of: Option<String>,
+        #[arg(long)]
+        top: Option<u64>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ResourceCmd {
+    /// Request an infrastructure resource.
+    Request {
+        #[arg(long)]
+        resource_type: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        project: Option<String>,
+        /// Spec as a JSON object.
+        #[arg(long)]
+        spec: Option<String>,
+    },
+    /// Grant one resource access to another.
+    Grant {
+        #[arg(long)]
+        consumer: String,
+        #[arg(long)]
+        target: String,
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long)]
+        level: Option<String>,
+    },
+    /// List provisioned resources.
+    Ls {
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long)]
+        state: Option<String>,
+    },
+    /// Fetch one resource (poll provisioning/teardown).
+    Get { resource_id: String },
+    /// Tear down a resource.
+    Deprovision { resource_id: String },
+}
+
+#[derive(Subcommand)]
+enum SecretCmd {
+    /// Fetch a secret value (audited).
+    Get {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        project: Option<String>,
+    },
+    /// Rotate a secret to a fresh value.
+    Rotate {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        project: Option<String>,
+    },
+    /// List secret metadata (never values).
+    Ls {
+        #[arg(long)]
+        project: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum SeedCmd {
+    /// List every agent-seed module.
+    Ls,
+    /// Plan the minimal seed file set for a repo.
+    Plan {
+        #[arg(long)]
+        languages: Vec<String>,
+        #[arg(long)]
+        task: Option<String>,
+        #[arg(long)]
+        tier: Option<String>,
+    },
+    /// Fetch one seed module's body.
+    Get { id: String },
+    /// Plan + write the seed files to disk (dry-run unless --write).
+    Apply {
+        #[arg(long)]
+        languages: Vec<String>,
+        #[arg(long)]
+        task: Option<String>,
+        #[arg(long)]
+        tier: Option<String>,
+        #[arg(long)]
+        write: bool,
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        dir: Option<PathBuf>,
     },
 }
 
@@ -458,40 +836,54 @@ struct SourceCfg {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Restore default SIGPIPE so `asgard … | head` terminates quietly like any
+    // Unix tool instead of panicking on a broken-pipe write.
+    #[cfg(unix)]
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+
     // Load a local .env (if present) before anything reads the environment, so
     // provider keys and service master credentials (OpenAI, AWS, Auth0, …) can
     // live in one gitignored file. Real env vars always win over .env entries.
     let _ = dotenvy::dotenv();
 
+    let Cli {
+        database_url,
+        url,
+        pat,
+        profile,
+        output,
+        command,
+    } = Cli::parse();
+
+    // Logs go to stderr (never stdout, which carries CLI results). Server
+    // commands log at info; CLI commands stay quiet so client/transport chatter
+    // doesn't drown the output. RUST_LOG overrides either default.
+    let default_filter = if matches!(command, Cmd::Serve { .. } | Cmd::Mcp { .. }) {
+        "info"
+    } else {
+        "warn"
+    };
     tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| default_filter.into()),
         )
         .init();
 
-    let cli = Cli::parse();
-    match cli.command {
-        Cmd::Serve { bind, config } => serve(&cli.database_url, &bind, config).await?,
-        Cmd::Mcp { config } => run_mcp(&cli.database_url, config).await?,
+    match command {
+        // --- in-process server + offline commands (no PAT/URL) ---------------
+        Cmd::Serve { bind, config } => serve(&database_url, &bind, config).await?,
+        Cmd::Mcp { config } => run_mcp(&database_url, config).await?,
         Cmd::Init => {
             let p = asgard_cli::init_config(Path::new("."))?;
             println!("wrote {}", p.display());
         }
-        Cmd::Catalog {
-            cmd: CatalogCmd::Ls { kind, q },
-        } => {
-            let client = asgard_cli::Client::new(cli.url, cli.token);
-            let entities = client.catalog_ls(kind.as_deref(), q.as_deref()).await?;
-            for e in entities {
-                println!(
-                    "{}:{}/{}\t{}\t{}",
-                    e.kind.to_lowercase(),
-                    e.metadata.namespace,
-                    e.metadata.name,
-                    e.lifecycle,
-                    e.metadata.title.unwrap_or_default()
-                );
-            }
+        Cmd::Validate { path } => {
+            let report = asgard_cli::validate_manifest(&path)?;
+            println!("{report}");
         }
         Cmd::Agent {
             cmd: AgentCmd::New { template, name },
@@ -500,16 +892,77 @@ async fn main() -> anyhow::Result<()> {
             let written = asgard_cli::agent_new(&template, &dir)?;
             println!("scaffolded {} files into {}/", written.len(), dir.display());
         }
-        Cmd::Gateway {
-            cmd: GatewayCmd::Login { project },
-        } => {
-            let client = asgard_cli::Client::new(cli.url, cli.token);
-            let v = client.gateway_login(&project).await?;
-            println!("{}", serde_json::to_string_pretty(&v)?);
+        Cmd::Completions { shell } => {
+            let mut cmd = <Cli as clap::CommandFactory>::command();
+            clap_complete::generate(shell, &mut cmd, "asgard", &mut std::io::stdout());
+        }
+        Cmd::Login { no_default } => {
+            cmd_login(url.clone(), pat.clone(), profile.clone(), no_default).await?
+        }
+
+        // --- PAT-authed MCP client commands ----------------------------------
+        Cmd::Tools => {
+            let r = conn(&url, &pat, &profile, &output)?;
+            cmd_tools(&r).await;
+        }
+        Cmd::Call { tool, json, arg } => {
+            let r = conn(&url, &pat, &profile, &output)?;
+            let args = asgard_cli::mcp::args_from(json, &arg)?;
+            run_tool(&r, &tool, args, Shape::Auto).await;
+        }
+        Cmd::Catalog { cmd } => {
+            let r = conn(&url, &pat, &profile, &output)?;
+            match cmd {
+                CatalogCmd::Search { kind, query } => {
+                    let mut m = Map::new();
+                    opt(&mut m, "kind", kind);
+                    opt(&mut m, "query", query);
+                    run_tool(&r, "catalog_search", m, Shape::Auto).await;
+                }
+                CatalogCmd::Get {
+                    kind,
+                    namespace,
+                    name,
+                } => {
+                    let mut m = Map::new();
+                    m.insert("kind".into(), json!(kind));
+                    m.insert("name".into(), json!(name));
+                    opt(&mut m, "namespace", namespace);
+                    run_tool(&r, "catalog_get", m, Shape::Auto).await;
+                }
+                CatalogCmd::Services => {
+                    run_tool(&r, "list_services", Map::new(), Shape::Auto).await
+                }
+                CatalogCmd::Service { id } => {
+                    let mut m = Map::new();
+                    m.insert("id".into(), json!(id));
+                    run_tool(&r, "get_service", m, Shape::Auto).await;
+                }
+                CatalogCmd::Groups => run_tool(&r, "list_groups", Map::new(), Shape::Auto).await,
+            }
         }
         Cmd::Project { cmd } => {
-            let client = asgard_cli::Client::new(cli.url, cli.token);
-            let v = match cmd {
+            let r = conn(&url, &pat, &profile, &output)?;
+            match cmd {
+                ProjectCmd::Ls => {
+                    run_tool(
+                        &r,
+                        "list_projects",
+                        Map::new(),
+                        Shape::Rows(vec![
+                            "project_id",
+                            "name",
+                            "owner",
+                            "manager",
+                            "group",
+                            "classification",
+                            "lifecycle",
+                            "budget_usd",
+                            "spent_usd",
+                        ]),
+                    )
+                    .await
+                }
                 ProjectCmd::Register {
                     name,
                     owner,
@@ -520,51 +973,621 @@ async fn main() -> anyhow::Result<()> {
                     budget_usd,
                     description,
                 } => {
-                    client
-                        .register_project(serde_json::json!({
-                            "name": name,
-                            "owner_email": owner,
-                            "manager_email": manager,
-                            "group": group,
-                            "classification": classification,
-                            "data_class": data_class,
-                            "budget_usd": budget_usd,
-                            "description": description,
-                        }))
-                        .await?
+                    let mut m = Map::new();
+                    m.insert("name".into(), json!(name));
+                    if !owner.is_empty() {
+                        m.insert("owner_email".into(), json!(owner));
+                    }
+                    if !manager.is_empty() {
+                        m.insert("manager_email".into(), json!(manager));
+                    }
+                    if !group.is_empty() {
+                        m.insert("group".into(), json!(group));
+                    }
+                    opt(&mut m, "classification", classification);
+                    opt(&mut m, "data_class", data_class);
+                    opt(&mut m, "budget_usd", budget_usd);
+                    opt(&mut m, "description", description);
+                    run_tool(&r, "register_project", m, Shape::Auto).await;
                 }
-                ProjectCmd::Ls => client.list_projects().await?,
-                ProjectCmd::Cost { by } => client.cost(&by).await?,
-            };
-            println!("{}", serde_json::to_string_pretty(&v)?);
+                ProjectCmd::Update {
+                    project_id,
+                    name,
+                    description,
+                    budget_usd,
+                } => {
+                    let mut m = Map::new();
+                    m.insert("project_id".into(), json!(project_id));
+                    opt(&mut m, "name", name);
+                    opt(&mut m, "description", description);
+                    opt(&mut m, "budget_usd", budget_usd);
+                    run_tool(&r, "update_project", m, Shape::Auto).await;
+                }
+                ProjectCmd::Get { project_id } => {
+                    run_tool(
+                        &r,
+                        "project_get",
+                        one("project_id", project_id),
+                        Shape::Auto,
+                    )
+                    .await
+                }
+                ProjectCmd::State { project_id } => {
+                    run_tool(
+                        &r,
+                        "project_state",
+                        one("project_id", project_id),
+                        Shape::Auto,
+                    )
+                    .await
+                }
+                ProjectCmd::Credential { project_id } => {
+                    run_tool(
+                        &r,
+                        "gateway_credential",
+                        one("project_id", project_id),
+                        Shape::Auto,
+                    )
+                    .await
+                }
+                ProjectCmd::Promotion { project_id } => {
+                    run_tool(
+                        &r,
+                        "promotion_status",
+                        one("project_id", project_id),
+                        Shape::Auto,
+                    )
+                    .await
+                }
+                ProjectCmd::Promote { project_id, target } => {
+                    let mut m = Map::new();
+                    m.insert("project_id".into(), json!(project_id));
+                    m.insert("target".into(), json!(target));
+                    run_tool(&r, "request_promotion", m, Shape::Auto).await;
+                }
+                ProjectCmd::Escalate { request_id } => {
+                    run_tool(
+                        &r,
+                        "escalate_promotion",
+                        one("request_id", request_id),
+                        Shape::Auto,
+                    )
+                    .await
+                }
+            }
         }
-        Cmd::Request {
-            model,
-            data_class,
-            as_user,
+        Cmd::Standards { cmd } => {
+            let r = conn(&url, &pat, &profile, &output)?;
+            match cmd {
+                StandardsCmd::Ls => run_tool(&r, "list_standards", Map::new(), Shape::Auto).await,
+                StandardsCmd::Get { id } => {
+                    run_tool(&r, "get_standards", one("id", id), Shape::Auto).await
+                }
+            }
+        }
+        Cmd::Guidance { cmd } => {
+            let r = conn(&url, &pat, &profile, &output)?;
+            match cmd {
+                GuidanceCmd::Ls => run_tool(&r, "guidance_list", Map::new(), Shape::Auto).await,
+                GuidanceCmd::Get { slug } => {
+                    run_tool(&r, "guidance_get", one("slug", slug), Shape::Auto).await
+                }
+                GuidanceCmd::Put {
+                    title,
+                    body,
+                    slug,
+                    summary,
+                    category,
+                    tags,
+                } => {
+                    let mut m = Map::new();
+                    m.insert("title".into(), json!(title));
+                    m.insert("body".into(), json!(body));
+                    opt(&mut m, "slug", slug);
+                    opt(&mut m, "summary", summary);
+                    opt(&mut m, "category", category);
+                    if !tags.is_empty() {
+                        m.insert("tags".into(), json!(tags));
+                    }
+                    run_tool(&r, "guidance_put", m, Shape::Auto).await;
+                }
+            }
+        }
+        Cmd::Recipe { cmd } => {
+            let r = conn(&url, &pat, &profile, &output)?;
+            match cmd {
+                RecipeCmd::Ls => run_tool(&r, "recipe_list", Map::new(), Shape::Auto).await,
+                RecipeCmd::Get { slug } => {
+                    run_tool(&r, "recipe_get", one("slug", slug), Shape::Auto).await
+                }
+                RecipeCmd::Put {
+                    name,
+                    body,
+                    slug,
+                    summary,
+                    spec,
+                    tags,
+                } => {
+                    let mut m = Map::new();
+                    m.insert("name".into(), json!(name));
+                    m.insert("body".into(), json!(body));
+                    opt(&mut m, "slug", slug);
+                    opt(&mut m, "summary", summary);
+                    if let Some(s) = spec {
+                        m.insert("spec".into(), parse_json(&s)?);
+                    }
+                    if !tags.is_empty() {
+                        m.insert("tags".into(), json!(tags));
+                    }
+                    run_tool(&r, "recipe_put", m, Shape::Auto).await;
+                }
+            }
+        }
+        Cmd::McpCatalog { cmd } => {
+            let r = conn(&url, &pat, &profile, &output)?;
+            match cmd {
+                McpCatalogCmd::Ls => {
+                    run_tool(&r, "mcp_catalog_list", Map::new(), Shape::Auto).await
+                }
+                McpCatalogCmd::Get { id } => {
+                    run_tool(&r, "mcp_catalog_get", one("id", id), Shape::Auto).await
+                }
+                McpCatalogCmd::Publish {
+                    name,
+                    id,
+                    summary,
+                    readme,
+                    install,
+                    repository,
+                    homepage,
+                    version,
+                    tags,
+                } => {
+                    let mut m = Map::new();
+                    m.insert("name".into(), json!(name));
+                    opt(&mut m, "id", id);
+                    opt(&mut m, "summary", summary);
+                    opt(&mut m, "readme", readme);
+                    if let Some(s) = install {
+                        m.insert("install".into(), parse_json(&s)?);
+                    }
+                    opt(&mut m, "repository", repository);
+                    opt(&mut m, "homepage", homepage);
+                    opt(&mut m, "version", version);
+                    if !tags.is_empty() {
+                        m.insert("tags".into(), json!(tags));
+                    }
+                    run_tool(&r, "mcp_catalog_publish", m, Shape::Auto).await;
+                }
+                McpCatalogCmd::SetState { id, state } => {
+                    let mut m = Map::new();
+                    m.insert("id".into(), json!(id));
+                    m.insert("state".into(), json!(state));
+                    run_tool(&r, "mcp_catalog_set_state", m, Shape::Auto).await;
+                }
+            }
+        }
+        Cmd::Cost { cmd } => {
+            let r = conn(&url, &pat, &profile, &output)?;
+            match cmd {
+                CostCmd::Report { by, since, until } => {
+                    let mut m = Map::new();
+                    opt(&mut m, "by", by);
+                    opt(&mut m, "since", since);
+                    opt(&mut m, "until", until);
+                    run_tool(&r, "cost_report", m, Shape::Auto).await;
+                }
+                CostCmd::Project {
+                    project_id,
+                    start,
+                    end,
+                } => {
+                    let mut m = Map::new();
+                    m.insert("project_id".into(), json!(project_id));
+                    opt(&mut m, "start", start);
+                    opt(&mut m, "end", end);
+                    run_tool(&r, "project_cost", m, Shape::Auto).await;
+                }
+                CostCmd::Series {
+                    project,
+                    from,
+                    until,
+                } => {
+                    let mut m = Map::new();
+                    m.insert("project".into(), json!(project));
+                    opt(&mut m, "from", from);
+                    opt(&mut m, "until", until);
+                    run_tool(&r, "cost_series", m, Shape::Auto).await;
+                }
+                CostCmd::By { by, from, until } => {
+                    let mut m = Map::new();
+                    opt(&mut m, "by", by);
+                    opt(&mut m, "from", from);
+                    opt(&mut m, "until", until);
+                    run_tool(&r, "cost_by", m, Shape::Auto).await;
+                }
+                CostCmd::Forecast { project_id } => {
+                    run_tool(
+                        &r,
+                        "cost_forecast",
+                        one("project_id", project_id),
+                        Shape::Auto,
+                    )
+                    .await
+                }
+                CostCmd::Anomalies { project, limit } => {
+                    let mut m = Map::new();
+                    opt(&mut m, "project", project);
+                    opt(&mut m, "limit", limit);
+                    run_tool(&r, "cost_anomalies", m, Shape::Auto).await;
+                }
+                CostCmd::Tree { as_of } => {
+                    let mut m = Map::new();
+                    opt(&mut m, "as_of", as_of);
+                    run_tool(&r, "cost_tree", m, Shape::Auto).await;
+                }
+                CostCmd::Movers { as_of, top } => {
+                    let mut m = Map::new();
+                    opt(&mut m, "as_of", as_of);
+                    opt(&mut m, "top", top);
+                    run_tool(&r, "cost_movers", m, Shape::Auto).await;
+                }
+            }
+        }
+        Cmd::Governance => {
+            let r = conn(&url, &pat, &profile, &output)?;
+            run_tool(&r, "governance_metrics", Map::new(), Shape::Auto).await;
+        }
+        Cmd::Resource { cmd } => {
+            let r = conn(&url, &pat, &profile, &output)?;
+            match cmd {
+                ResourceCmd::Request {
+                    resource_type,
+                    name,
+                    project,
+                    spec,
+                } => {
+                    let mut m = Map::new();
+                    m.insert("resource_type".into(), json!(resource_type));
+                    m.insert("name".into(), json!(name));
+                    opt(&mut m, "project_id", project);
+                    if let Some(s) = spec {
+                        m.insert("spec".into(), parse_json(&s)?);
+                    }
+                    run_tool(&r, "request_resource", m, Shape::Auto).await;
+                }
+                ResourceCmd::Grant {
+                    consumer,
+                    target,
+                    project,
+                    level,
+                } => {
+                    let mut m = Map::new();
+                    m.insert("consumer_resource_id".into(), json!(consumer));
+                    m.insert("target_resource_id".into(), json!(target));
+                    opt(&mut m, "project_id", project);
+                    opt(&mut m, "level", level);
+                    run_tool(&r, "request_grant", m, Shape::Auto).await;
+                }
+                ResourceCmd::Ls { project, state } => {
+                    let mut m = Map::new();
+                    opt(&mut m, "project_id", project);
+                    opt(&mut m, "state", state);
+                    run_tool(&r, "list_resources", m, Shape::Auto).await;
+                }
+                ResourceCmd::Get { resource_id } => {
+                    run_tool(
+                        &r,
+                        "get_resource",
+                        one("resource_id", resource_id),
+                        Shape::Auto,
+                    )
+                    .await
+                }
+                ResourceCmd::Deprovision { resource_id } => {
+                    run_tool(
+                        &r,
+                        "deprovision_resource",
+                        one("resource_id", resource_id),
+                        Shape::Auto,
+                    )
+                    .await
+                }
+            }
+        }
+        Cmd::Secret { cmd } => {
+            let r = conn(&url, &pat, &profile, &output)?;
+            match cmd {
+                SecretCmd::Get { name, project } => {
+                    let mut m = Map::new();
+                    m.insert("name".into(), json!(name));
+                    opt(&mut m, "project_id", project);
+                    run_tool(&r, "get_secret", m, Shape::Auto).await;
+                }
+                SecretCmd::Rotate { name, project } => {
+                    let mut m = Map::new();
+                    m.insert("name".into(), json!(name));
+                    opt(&mut m, "project_id", project);
+                    run_tool(&r, "rotate_secret", m, Shape::Auto).await;
+                }
+                SecretCmd::Ls { project } => {
+                    let mut m = Map::new();
+                    opt(&mut m, "project_id", project);
+                    run_tool(&r, "list_secrets", m, Shape::Auto).await;
+                }
+            }
+        }
+        Cmd::Seed { cmd } => {
+            let r = conn(&url, &pat, &profile, &output)?;
+            match cmd {
+                SeedCmd::Ls => run_tool(&r, "seed_list", Map::new(), Shape::Auto).await,
+                SeedCmd::Plan {
+                    languages,
+                    task,
+                    tier,
+                } => {
+                    let mut m = Map::new();
+                    if !languages.is_empty() {
+                        m.insert("languages".into(), json!(languages));
+                    }
+                    opt(&mut m, "task", task);
+                    opt(&mut m, "tier", tier);
+                    run_tool(&r, "seed_plan", m, Shape::Auto).await;
+                }
+                SeedCmd::Get { id } => run_tool(&r, "seed_get", one("id", id), Shape::Auto).await,
+                SeedCmd::Apply {
+                    languages,
+                    task,
+                    tier,
+                    write,
+                    force,
+                    dir,
+                } => cmd_apply_seed(&r, languages, task, tier, write, force, dir).await,
+            }
+        }
+        Cmd::Bootstrap {
+            languages,
+            task,
+            tier,
+            write,
+            force,
+            dir,
         } => {
-            let subject = if model.contains(':') {
-                model.clone()
-            } else {
-                format!("model:default/{model}")
-            };
-            let client = asgard_cli::Client::new(cli.url, cli.token);
-            let v = client
-                .submit_request(
-                    "access",
-                    &as_user,
-                    &subject,
-                    serde_json::json!({ "data_class": data_class }),
-                )
-                .await?;
-            println!("{}", serde_json::to_string_pretty(&v)?);
+            let r = conn(&url, &pat, &profile, &output)?;
+            cmd_apply_seed(&r, languages, task, tier, write, force, dir).await;
         }
-        Cmd::Validate { path } => {
-            let report = asgard_cli::validate_manifest(&path)?;
-            println!("{report}");
+        Cmd::Chat {
+            project,
+            model,
+            message,
+            max_tokens,
+            temperature,
+            data_class,
+        } => {
+            let r = conn(&url, &pat, &profile, &output)?;
+            let prof = profile.clone().unwrap_or_else(|| "default".to_string());
+            cmd_chat(
+                &r,
+                prof,
+                project,
+                model,
+                message,
+                max_tokens,
+                temperature,
+                data_class,
+            )
+            .await;
         }
     }
     Ok(())
+}
+
+// --- CLI dispatch helpers ----------------------------------------------------
+
+/// Resolve connection + output settings (flag/env, then profile, then defaults).
+fn conn(
+    url: &Option<String>,
+    pat: &Option<String>,
+    profile: &Option<String>,
+    output: &Option<String>,
+) -> anyhow::Result<Resolved> {
+    Ok(asgard_cli::config::load().resolve(
+        url.clone(),
+        pat.clone(),
+        profile.clone(),
+        output.clone(),
+    )?)
+}
+
+/// A single-key argument object (the common case).
+fn one(key: &str, val: String) -> Map<String, Value> {
+    let mut m = Map::new();
+    m.insert(key.to_string(), json!(val));
+    m
+}
+
+/// Insert `key` only when the option is present.
+fn opt(m: &mut Map<String, Value>, key: &str, v: Option<impl Into<Value>>) {
+    if let Some(x) = v {
+        m.insert(key.to_string(), x.into());
+    }
+}
+
+fn parse_json(s: &str) -> anyhow::Result<Value> {
+    serde_json::from_str(s).map_err(|e| anyhow::anyhow!("not valid JSON: {e}"))
+}
+
+/// The PAT, or a fail-fast exit-3 with actionable guidance.
+fn require_pat(r: &Resolved) -> String {
+    match &r.pat {
+        Some(p) => p.clone(),
+        None => {
+            eprintln!(
+                "error: no PAT configured — pass --pat, set ASGARD_PAT, or run `asgard login`"
+            );
+            std::process::exit(3);
+        }
+    }
+}
+
+/// Render a tool result and exit with a stable code: 0 ok, 2 tool error, else the
+/// error's own code (3 auth / 1 transport).
+fn emit(
+    out: Result<asgard_cli::mcp::ToolOutput, asgard_cli::CliError>,
+    shape: Shape,
+    output: Output,
+) -> ! {
+    match out {
+        Ok(t) if t.is_error => {
+            eprintln!("{}", t.raw_text);
+            std::process::exit(2);
+        }
+        Ok(t) => {
+            println!("{}", render(&t.value, shape, output));
+            std::process::exit(0);
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::exit(e.exit_code());
+        }
+    }
+}
+
+/// Call one tool and emit the result (diverges).
+async fn run_tool(r: &Resolved, tool: &str, args: Map<String, Value>, shape: Shape) {
+    let pat = require_pat(r);
+    let out = McpClient::new(&r.url, pat).call(tool, args).await;
+    emit(out, shape, r.output);
+}
+
+async fn cmd_tools(r: &Resolved) {
+    let pat = require_pat(r);
+    match McpClient::new(&r.url, pat).tools().await {
+        Ok(ts) => {
+            let val = Value::Array(
+                ts.iter()
+                    .map(|t| json!({ "name": t.name, "description": t.description }))
+                    .collect(),
+            );
+            println!(
+                "{}",
+                render(&val, Shape::Rows(vec!["name", "description"]), r.output)
+            );
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::exit(e.exit_code());
+        }
+    }
+}
+
+fn read_pat() -> anyhow::Result<String> {
+    use std::io::Write;
+    eprint!("Asgard PAT (asg_pat_…): ");
+    std::io::stderr().flush().ok();
+    let mut s = String::new();
+    std::io::stdin().read_line(&mut s)?;
+    let s = s.trim().to_string();
+    anyhow::ensure!(!s.is_empty(), "no PAT entered");
+    Ok(s)
+}
+
+async fn cmd_login(
+    url: Option<String>,
+    pat: Option<String>,
+    profile: Option<String>,
+    no_default: bool,
+) -> anyhow::Result<()> {
+    let prof = profile.unwrap_or_else(|| "default".to_string());
+    let pat = match pat {
+        Some(p) => p,
+        None => read_pat()?,
+    };
+    if let Some(u) = &url {
+        if let Err(e) = McpClient::new(u, pat.clone()).tools().await {
+            eprintln!("error: that PAT did not validate against {u}: {e}");
+            std::process::exit(3);
+        }
+    }
+    let path = asgard_cli::config::save_login(&prof, url.as_deref(), &pat, !no_default)?;
+    println!("saved profile '{prof}' → {}", path.display());
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn cmd_chat(
+    r: &Resolved,
+    profile: String,
+    project: String,
+    model: String,
+    message: String,
+    max_tokens: Option<u32>,
+    temperature: Option<f32>,
+    data_class: Option<String>,
+) {
+    let pat = require_pat(r);
+    let req = asgard_cli::chat::ChatRequest {
+        url: &r.url,
+        pat: &pat,
+        profile: &profile,
+        project: &project,
+        model,
+        message,
+        max_tokens,
+        temperature,
+        data_class,
+    };
+    match asgard_cli::chat::chat(req).await {
+        Ok(v) => println!("{}", render(&v, Shape::Auto, r.output)),
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::exit(e.exit_code());
+        }
+    }
+}
+
+async fn cmd_apply_seed(
+    r: &Resolved,
+    languages: Vec<String>,
+    task: Option<String>,
+    tier: Option<String>,
+    write: bool,
+    force: bool,
+    dir: Option<PathBuf>,
+) {
+    let pat = require_pat(r);
+    let mut m = Map::new();
+    if !languages.is_empty() {
+        m.insert("languages".into(), json!(languages));
+    }
+    opt(&mut m, "task", task);
+    opt(&mut m, "tier", tier);
+    let out = match McpClient::new(&r.url, pat).call("bootstrap", m).await {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::exit(e.exit_code());
+        }
+    };
+    if out.is_error {
+        eprintln!("{}", out.raw_text);
+        std::process::exit(2);
+    }
+    let dest = dir.unwrap_or_else(|| PathBuf::from("."));
+    match asgard_cli::seed::apply(&out.value, &dest, write, force) {
+        Ok(results) => {
+            for (p, a) in &results {
+                println!("{}\t{}", a.label(), p.display());
+            }
+            if !write {
+                eprintln!("\ndry run — pass --write to create these files");
+            }
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::exit(e.exit_code());
+        }
+    }
 }
 
 struct Core {
