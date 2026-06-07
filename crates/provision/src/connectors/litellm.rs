@@ -181,6 +181,7 @@ mod tests {
             config: json!({}),
             estimated_monthly_usd: 0.0,
             secret_outputs: vec!["api_key".into()],
+            resource_id: None,
         }
     }
 

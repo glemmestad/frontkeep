@@ -363,7 +363,7 @@
     // pill color buckets keyed by well-known lifecycle / tier / outcome values
     const PILLMAP = {
       active:'green', success:'green', allowed:'green', approved:'green', healthy:'green', provisioned:'green',
-      killed:'red', error:'red', denied:'red', rejected:'red', failed:'red', decommissioned:'red', destroyed:'red',
+      killed:'red', error:'red', denied:'red', rejected:'red', failed:'red', destroy_failed:'red', decommissioned:'red', destroyed:'red',
       suspended:'blue', suspending:'amber', resuming:'amber', destroying:'amber',
       pending:'amber', requested:'amber', 'in-review':'amber',
       production:'teal', stable:'teal',
@@ -549,6 +549,9 @@
     let meEmail = '';
     let APP_CFG = {};
     const isAdmin = () => currentRole === 'admin';
+    // Run-logs can carry provider secrets, so the Logs viewer is ViewAudit-gated
+    // (admin + finance), mirroring the server's gate on /resources/{rid}/runs.
+    const canViewAudit = () => currentRole === 'admin' || currentRole === 'finance';
     // Cost views are visible to everyone — each is scoped server-side to the
     // projects the caller owns or manages (Admin/Finance see all). Only the Users
     // page is role-restricted.
@@ -2021,15 +2024,73 @@
         } catch (e) { out.innerHTML = errBanner(e); }
       }
 
+      const FAILED_STATES = new Set(['failed', 'destroy_failed']);
       const resourceTable = (resources) => {
         if (!resources.length) return empty('No resources provisioned.');
-        return `<div class="tablewrap"><table><thead><tr>
-          <th>type</th><th>name</th><th>state</th><th class="r">est/mo</th>
-          </tr></thead><tbody>${resources.map(r => `<tr>
+        const audit = canViewAudit();
+        const rows = resources.map(r => {
+          const failed = FAILED_STATES.has(String(r.state || '').toLowerCase());
+          const acts = [];
+          if (failed) acts.push(`<button class="act" data-retry="${esc(r.id)}">Retry</button>`);
+          if (audit) acts.push(`<button class="act" data-logs="${esc(r.id)}" style="background:var(--chip);color:var(--fg);border:1px solid var(--line2)">Logs</button>`);
+          const errRow = (failed && r.error)
+            ? `<tr><td></td><td colspan="4"><div class="muted" style="font-size:12px;color:var(--red);white-space:pre-wrap">${esc(r.error)}</div></td></tr>`
+            : '';
+          const logRow = audit
+            ? `<tr id="logs-${esc(r.id)}" style="display:none"><td></td><td colspan="4"><div class="logbox"></div></td></tr>`
+            : '';
+          return `<tr>
             <td>${pill(r.rtype,'blue')}</td>
             <td>${esc(r.name)}</td>
             <td>${pill(r.state)}</td>
-            <td class="r num">${money(r.est_monthly_usd)}</td></tr>`).join('')}</tbody></table></div>`;
+            <td class="r num">${money(r.est_monthly_usd)}</td>
+            <td class="r">${acts.join(' ')}</td></tr>${errRow}${logRow}`;
+        }).join('');
+        return `<div class="tablewrap"><table><thead><tr>
+          <th>type</th><th>name</th><th>state</th><th class="r">est/mo</th><th class="r">actions</th>
+          </tr></thead><tbody>${rows}</tbody></table></div>`;
+      };
+
+      // One captured connector run: action + ok/fail badge + timestamps + the full
+      // (decrypted) output. Newest interest is the last attempt, so show them in
+      // capture order (oldest first) as a scrollable log.
+      const runLogView = (runs) => {
+        if (!runs || !runs.length) return `<div class="muted" style="font-size:12px">No runs captured yet.</div>`;
+        return runs.map(r => `<div style="margin:0 0 10px">
+          <div class="row" style="gap:8px;align-items:center;margin:0 0 4px">
+            ${pill(r.action,'blue')}${pill(r.ok ? 'ok' : 'failed', r.ok ? 'green' : 'red')}
+            <span class="muted" style="font-size:11px">${esc(r.started_at)} → ${esc(r.finished_at)}</span>
+          </div>
+          <pre style="margin:0;max-height:280px;overflow:auto;background:var(--code);border:1px solid var(--line);border-radius:8px;padding:10px;font-family:var(--mono);font-size:12px;white-space:pre-wrap">${esc(r.output)}</pre>
+        </div>`).join('');
+      };
+
+      // Attach Retry / Logs handlers to the resource rows currently in #p-res.
+      // Idempotent — safe to call after every re-render of the table.
+      const wireResources = (id) => {
+        const slot = document.getElementById('p-res');
+        if (!slot) return;
+        slot.querySelectorAll('[data-retry]').forEach(b => b.onclick = async () => {
+          const rid = b.dataset.retry, t0 = b.textContent;
+          b.disabled = true; b.textContent = 'Retrying…';
+          try {
+            await api(`/api/projects/${enc(id)}/resources/${enc(rid)}/retry`, { method: 'POST' });
+            const rs = await api(`/api/projects/${enc(id)}/resources`);
+            slot.innerHTML = resourceTable(rs); wireResources(id);
+          } catch (e) { b.disabled = false; b.textContent = t0; alert(e.message); }
+        });
+        slot.querySelectorAll('[data-logs]').forEach(b => b.onclick = async () => {
+          const rid = b.dataset.logs, row = document.getElementById(`logs-${rid}`);
+          if (!row) return;
+          if (row.style.display !== 'none') { row.style.display = 'none'; b.textContent = 'Logs'; return; }
+          const box = row.querySelector('.logbox');
+          box.innerHTML = `<div class="muted" style="font-size:12px">Loading…</div>`;
+          row.style.display = ''; b.textContent = 'Hide';
+          try {
+            const runs = await api(`/api/projects/${enc(id)}/resources/${enc(rid)}/runs`);
+            box.innerHTML = runLogView(runs);
+          } catch (e) { box.innerHTML = `<div class="muted" style="font-size:12px;color:var(--red)">${esc(e.message)}</div>`; }
+        });
       };
 
       async function showDetail(id) {
@@ -2081,6 +2142,7 @@
           <div class="row">${actions}</div>`;
         root().querySelector('.crumb').onclick = () => showList();
         root().querySelectorAll('.pbtn').forEach(b => b.onclick = () => doAction(id, b.dataset.kind));
+        wireResources(id);
         const reviewRefresh = root().querySelector('#review-refresh');
         if (reviewRefresh) reviewRefresh.onclick = () => showDetail(id);
         const idEdit = root().querySelector('#id-edit');
@@ -2194,7 +2256,7 @@
         let polling = true;
         const tick = async () => {
           if (!polling) return;
-          try { const rs = await api(`/api/projects/${enc(id)}/resources`); const slot = document.getElementById('p-res'); if (slot) slot.innerHTML = resourceTable(rs); } catch {}
+          try { const rs = await api(`/api/projects/${enc(id)}/resources`); const slot = document.getElementById('p-res'); if (slot) { slot.innerHTML = resourceTable(rs); wireResources(id); } } catch {}
           if (polling) setTimeout(tick, 2000);
         };
         setTimeout(tick, 600);

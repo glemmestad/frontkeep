@@ -27,8 +27,8 @@ use asgard_policy::{CedarEngine, PolicyEngine};
 use asgard_provision::{
     AutoApprovePolicy, AwsCostExplorerSource, BuiltinSecretStore, CloudTarget,
     DatabricksCostSource, ExecConnector, ExecCostSource, GatewaySource, LiteLlmConnector,
-    LiteLlmCostSource, ProvisionRepo, ProvisionService, SecretStore, ServiceCatalog,
-    TerraformConnector, TfStateStore, DEV_SECRET_KEY,
+    LiteLlmCostSource, ProvisionRepo, ProvisionService, RunLogStore, SecretStore, ServiceCatalog,
+    StubProvisioner, TerraformConnector, TfStateStore, DEV_SECRET_KEY,
 };
 use asgard_registry::{
     ClassificationRequirements, GovernanceConfig, GroupAllowlist, GroupEntry, ProjectRegistry,
@@ -576,6 +576,11 @@ struct Config {
     /// services ignore it and return immediately.
     #[serde(default)]
     provision_wait_secs: Option<u64>,
+    /// Fleet-wide cap on automatic provisioning retries. Absent = 5; 0 disables
+    /// auto-retry everywhere. A service manifest's `retry.max_attempts` overrides
+    /// this per service.
+    #[serde(default)]
+    provision_max_retries: Option<u32>,
     /// How often the provisioning reconciler re-drives orphaned/stale work-state
     /// rows and enqueues approved-but-recordless requests. Absent = 60.
     #[serde(default)]
@@ -1672,6 +1677,9 @@ async fn serve(database_url: &str, bind: &str, config_path: Option<PathBuf>) -> 
     if let Some(secs) = config.provision_wait_secs {
         provision.set_wait_budget_secs(secs);
     }
+    if let Some(n) = config.provision_max_retries {
+        provision.set_max_retries(n);
+    }
 
     // A platform-owned system project + gateway key so the dashboard's cost Q&A and
     // the built-in review judge work without a human pasting a key. Spend is
@@ -2158,6 +2166,21 @@ fn build_provision(db: Db, config: &Config, leases: Option<(Leases, i64)>) -> Pr
         );
     }
 
+    // Per-resource run-log: every connector run (apply/destroy, success or
+    // failure) is captured here, encrypted with the same master key as TF state
+    // and read-gated to ViewAudit. Built unconditionally so the stub fallback
+    // captures in dev/e2e too; the stub is re-registered to carry the store
+    // (ProvisionService::new makes it before the store exists).
+    let run_log = Arc::new(RunLogStore::new(
+        db.clone(),
+        master_key.unwrap_or(DEV_SECRET_KEY),
+    ));
+    svc.register_backend(
+        "stub",
+        Arc::new(StubProvisioner::new().with_run_log(run_log.clone())),
+    );
+    svc.set_run_log(run_log.clone());
+
     // Provisioning arms from an `asgard.yaml` block or, for a container-first
     // deploy with no config file, from env alone (ASGARD_TF_MODULES_DIR + friends).
     let env_provisioning = provisioning_from_env();
@@ -2186,7 +2209,8 @@ fn build_provision(db: Db, config: &Config, leases: Option<(Leases, i64)>) -> Pr
             master_key.unwrap_or(DEV_SECRET_KEY),
         ));
         let mut connector = TerraformConnector::new(tf.bin.clone(), tf.modules_dir.clone(), work)
-            .with_state(tf_state);
+            .with_state(tf_state)
+            .with_run_log(run_log.clone());
         if let Some((leases, ttl)) = &leases {
             connector = connector.with_leases(leases.clone(), *ttl);
         }

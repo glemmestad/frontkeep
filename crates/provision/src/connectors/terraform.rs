@@ -23,7 +23,9 @@ use tokio::sync::Mutex;
 
 use asgard_storage::leases::Leases;
 
-use crate::{Plan, ProvisionError, ProvisionRequest, Provisioned, Provisioner, TfStateStore};
+use crate::{
+    Plan, ProvisionError, ProvisionRequest, Provisioned, Provisioner, RunLogStore, TfStateStore,
+};
 
 /// Renews a held lease in the background while a long terraform run executes, and
 /// stops on drop. We never block on an async release in `Drop`: a graceful path
@@ -78,6 +80,9 @@ pub struct TerraformConnector {
     /// TTL for the per-resource lease, renewed at a third of this while an apply
     /// runs (so a multi-minute apply keeps the lock) and freed by expiry on crash.
     tf_lease_ttl: i64,
+    /// Captures the full plan+apply / destroy log per resource for operator audit.
+    /// `None` keeps runs unlogged (tests).
+    run_log: Option<Arc<RunLogStore>>,
 }
 
 impl TerraformConnector {
@@ -90,6 +95,7 @@ impl TerraformConnector {
             locks: Mutex::new(HashMap::new()),
             leases: None,
             tf_lease_ttl: 600,
+            run_log: None,
         }
     }
 
@@ -97,6 +103,13 @@ impl TerraformConnector {
     /// ephemeral work dirs.
     pub fn with_state(mut self, store: Arc<TfStateStore>) -> Self {
         self.state = Some(store);
+        self
+    }
+
+    /// Attach the run-log store so each apply/destroy's combined output is captured
+    /// (per resource) for the operator audit view.
+    pub fn with_run_log(mut self, store: Arc<RunLogStore>) -> Self {
+        self.run_log = Some(store);
         self
     }
 
@@ -273,11 +286,16 @@ impl TerraformConnector {
         id: &str,
     ) -> Result<Provisioned, ProvisionError> {
         let (wd, version) = self.prepare(req, plan, overrides).await?;
-        let applied = self
-            .run(
+        let started = asgard_storage::now();
+        let (log, applied) = self
+            .run_capture(
                 &wd,
                 &["apply", "-auto-approve", "-input=false", "-no-color"],
             )
+            .await;
+        // Capture the full plan+apply log against the resource for operator audit,
+        // success or failure, before anything else can short-circuit.
+        self.record_run(req, "apply", applied.is_ok(), &log, &started)
             .await;
         // Persist whatever state exists — even after a partial-apply failure —
         // before surfacing the apply error, or we'd lose track of created
@@ -322,11 +340,14 @@ impl TerraformConnector {
         // restart the dir is gone but the state lives in the DB.
         let plan = self.plan(req).await?;
         let (wd, version) = self.prepare(req, &plan, &Value::Null).await?;
-        let destroyed = self
-            .run(
+        let started = asgard_storage::now();
+        let (log, destroyed) = self
+            .run_capture(
                 &wd,
                 &["destroy", "-auto-approve", "-input=false", "-no-color"],
             )
+            .await;
+        self.record_run(req, "destroy", destroyed.is_ok(), &log, &started)
             .await;
         let _ = self.persist(id, &wd, version).await;
         destroyed?;
@@ -355,6 +376,81 @@ impl TerraformConnector {
         }
         Ok(out)
     }
+
+    /// Like [`run`](Self::run) but always returns the combined stdout+stderr (the
+    /// audit log) alongside the result, so a failed run's full output is captured
+    /// rather than reduced to a one-line error.
+    async fn run_capture(
+        &self,
+        dir: &Path,
+        args: &[&str],
+    ) -> (String, Result<std::process::Output, ProvisionError>) {
+        let chdir = format!("-chdir={}", dir.display());
+        let mut full = vec![chdir.as_str()];
+        full.extend_from_slice(args);
+        match Command::new(&self.bin).args(&full).output().await {
+            Ok(out) => {
+                let log = combine_output(&out);
+                if out.status.success() {
+                    (log, Ok(out))
+                } else {
+                    let stderr = String::from_utf8_lossy(&out.stderr);
+                    let msg = format!(
+                        "terraform {} failed: {}",
+                        args.first().copied().unwrap_or(""),
+                        stderr.trim()
+                    );
+                    (log, Err(ProvisionError::Backend(msg)))
+                }
+            }
+            Err(e) => {
+                let msg = format!("spawn terraform: {e}");
+                (msg.clone(), Err(ProvisionError::Backend(msg)))
+            }
+        }
+    }
+
+    /// Append one run entry to the resource's audit log (no-op without a store or a
+    /// resource id). Best-effort: a logging failure never breaks the provision.
+    async fn record_run(
+        &self,
+        req: &ProvisionRequest,
+        action: &str,
+        ok: bool,
+        output: &str,
+        started_at: &str,
+    ) {
+        if let (Some(store), Some(rid)) = (&self.run_log, &req.resource_id) {
+            let finished = asgard_storage::now();
+            if let Err(e) = store
+                .append(
+                    rid,
+                    &req.ctx.project_id,
+                    action,
+                    ok,
+                    output,
+                    started_at,
+                    &finished,
+                )
+                .await
+            {
+                tracing::warn!("run-log append for {rid} failed: {e}");
+            }
+        }
+    }
+}
+
+/// Combined stdout+stderr of a finished command (the human-readable run log).
+fn combine_output(out: &std::process::Output) -> String {
+    let mut s = String::from_utf8_lossy(&out.stdout).into_owned();
+    let err = String::from_utf8_lossy(&out.stderr);
+    if !err.trim().is_empty() {
+        if !s.is_empty() && !s.ends_with('\n') {
+            s.push('\n');
+        }
+        s.push_str(&err);
+    }
+    s
 }
 
 /// Copy module files into the working dir (skipping persisted state + the
@@ -552,6 +648,7 @@ mod tests {
             config: serde_json::json!({"stop_tfvars": {"desired_count": 0}}),
             estimated_monthly_usd: 35.0,
             secret_outputs: vec![],
+            resource_id: None,
         }
     }
 

@@ -102,6 +102,14 @@ ASGARD_DEV_INSECURE=1 ASGARD_DATABASE_URL="sqlite:///tmp/asgard.db" \
   Cost-bearing / IAM-shaping services set `auto_approvable: false`. Non-AWS is the
   same path: `modules/databricks/*` + `modules/auth0/*` prove the connector is
   provider-agnostic (the TF subprocess inherits provider creds from Asgard's env).
+  Two optional manifest knobs: `long_running: true` (latency hint — returns the
+  `provisioning` record immediately, apply runs in the background; never a
+  correctness lever) and `retry: {max_attempts, base_secs, cap_secs}` (per-service
+  auto-retry override; `max_attempts: 0` disables it; fleet default is
+  `provision_max_retries`). Every connector run (apply/destroy, success+failure) is
+  captured to `provision_runs` per resource — encrypted at rest, `ViewAudit`-gated
+  (REST `…/resources/{rid}/runs`, MCP `resource_runs`, UI Logs button). Full
+  contract + commented skeleton: `docs/docs/authoring-a-service.md`.
 - **New inference backend = a plug-in manifest, never core code.** `kind:
   openai-compatible` + `base_url_env` + (if the path isn't `/v1/chat/completions`)
   a `chat_path` with an optional `{model}` placeholder. Databricks Model Serving is

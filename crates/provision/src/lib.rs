@@ -21,6 +21,7 @@ pub mod connectors;
 pub mod cost;
 mod manifest;
 mod repo;
+mod runlog;
 pub mod secrets;
 mod stub;
 mod tfstate;
@@ -47,10 +48,11 @@ pub use cost::{
     RollupDim, RollupRow, TaggedReport,
 };
 pub use manifest::{
-    class_rank, InferenceCfg, InferenceModel, Resolved, ServiceCatalog, ServiceManifest, Variant,
-    Variants,
+    class_rank, InferenceCfg, InferenceModel, Resolved, RetryCfg, ServiceCatalog, ServiceManifest,
+    Variant, Variants,
 };
 pub use repo::{ProvisionRepo, ProvisionedRecord};
+pub use runlog::{RunLogEntry, RunLogStore};
 pub use secrets::{BuiltinSecretStore, SecretInfo, SecretRef, SecretStore};
 pub use stub::StubProvisioner;
 pub use tfstate::TfStateStore;
@@ -189,6 +191,10 @@ pub struct ProvisionRequest {
     pub estimated_monthly_usd: f64,
     /// Output keys whose values are secrets: routed to the secret store.
     pub secret_outputs: Vec<String>,
+    /// The provisioned-resource record id this run acts on, so a connector can
+    /// attach its captured output to the resource's run-log. `None` ⇒ no capture
+    /// (e.g. the dry-run `plan` gate, or a request built outside a driven record).
+    pub resource_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -373,6 +379,12 @@ pub struct ProvisionService {
     /// How long a request waits inline for its apply before returning the
     /// `provisioning` record for the caller to poll (0 for `long_running`).
     wait_budget: Duration,
+    /// Captures each connector run's output (encrypted, per resource) for the admin
+    /// audit/debug view. `None` ⇒ capture is off (bare unit tests).
+    run_log: Option<Arc<RunLogStore>>,
+    /// Deployment-wide default cap on auto-retries of a failed apply/destroy; a
+    /// service's `retry.max_attempts` overrides it, 0 disables auto-retry.
+    max_retries: u32,
 }
 
 /// A work-state row is reclaimable once its claim heartbeat is older than this.
@@ -381,6 +393,11 @@ pub struct ProvisionService {
 const STALE_SECS: i64 = 900;
 /// Claim heartbeat cadence while a long apply/destroy runs.
 const HEARTBEAT_SECS: u64 = 60;
+/// Default auto-retry policy (overridable per service via `retry`, and fleet-wide
+/// via `provision_max_retries`). 5 tries, 60s backoff doubling to a 1h cap.
+const MAX_RETRIES: u32 = 5;
+const RETRY_BASE_SECS: u64 = 60;
+const RETRY_CAP_SECS: u64 = 3600;
 
 /// What one `roll_up_costs` pass touched, for logging and the e2e proof.
 #[derive(Debug, Clone, Default, Serialize)]
@@ -421,6 +438,8 @@ impl ProvisionService {
             workflow: None,
             instance_id: asgard_storage::new_uid(),
             wait_budget: Duration::from_secs(5),
+            run_log: None,
+            max_retries: MAX_RETRIES,
         }
     }
 
@@ -435,6 +454,34 @@ impl ProvisionService {
     /// returning its `provisioning` record to poll. 0 disables the wait.
     pub fn set_wait_budget_secs(&mut self, secs: u64) {
         self.wait_budget = Duration::from_secs(secs);
+    }
+
+    /// Attach the run-log store so connector output is captured per resource.
+    pub fn set_run_log(&mut self, store: Arc<RunLogStore>) {
+        self.run_log = Some(store);
+    }
+
+    /// Deployment-wide auto-retry cap (0 disables auto-retry fleet-wide). A
+    /// service's manifest `retry.max_attempts` still overrides this per service.
+    pub fn set_max_retries(&mut self, n: u32) {
+        self.max_retries = n;
+    }
+
+    /// The effective retry policy for a service: its manifest `retry` over the
+    /// deployment defaults.
+    fn retry_policy_for(&self, rtype: &str) -> RetryPolicy {
+        let cfg = self.catalog.get(rtype).and_then(|m| m.retry.clone());
+        RetryPolicy {
+            max_attempts: cfg
+                .as_ref()
+                .and_then(|r| r.max_attempts)
+                .unwrap_or(self.max_retries),
+            base_secs: cfg
+                .as_ref()
+                .and_then(|r| r.base_secs)
+                .unwrap_or(RETRY_BASE_SECS),
+            cap_secs: cfg.and_then(|r| r.cap_secs).unwrap_or(RETRY_CAP_SECS),
+        }
     }
 
     /// Register a connector under its name (`terraform`, `exec`, …).
@@ -1195,6 +1242,41 @@ impl ProvisionService {
         self.inline_wait(resource_id, budget).await
     }
 
+    /// Manually retry a `failed` / `destroy_failed` resource now — re-arm its retry
+    /// bookkeeping (back to the work state, attempts reset) and drive it immediately,
+    /// bypassing the backoff window. A no-op for any other state.
+    pub async fn retry_resource(
+        &self,
+        resource_id: &str,
+    ) -> Result<ProvisionedRecord, ProvisionError> {
+        let rec = self
+            .repo
+            .get(resource_id)
+            .await?
+            .ok_or_else(|| ProvisionError::NotFound(resource_id.to_string()))?;
+        if rec.state != "failed" && rec.state != "destroy_failed" {
+            return Ok(rec);
+        }
+        self.repo.reset_for_retry(resource_id).await?;
+        self.dispatch(resource_id).await?;
+        let budget = self.budget_for(self.catalog.get(&rec.rtype));
+        self.inline_wait(resource_id, budget).await
+    }
+
+    /// The captured connector runs (apply/destroy, success and failure) for a
+    /// resource, oldest first (the attempt timeline). Empty when capture is off or
+    /// the resource has not run yet. The caller is responsible for the `ViewAudit`
+    /// gate — the output can contain provider secrets.
+    pub async fn resource_runs(
+        &self,
+        resource_id: &str,
+    ) -> Result<Vec<RunLogEntry>, ProvisionError> {
+        match &self.run_log {
+            Some(store) => store.list_for_resource(resource_id).await,
+            None => Ok(vec![]),
+        }
+    }
+
     /// The connector + a re-drive request for an existing record — the shape every
     /// post-provision op (`destroy`/`stop`/`resume`) needs to call back into the
     /// connector with the resource's original spec and tags.
@@ -1209,6 +1291,7 @@ impl ProvisionService {
             config,
             estimated_monthly_usd: rec.est_monthly_usd,
             secret_outputs: vec![],
+            resource_id: Some(rec.id.clone()),
         };
         (backend, preq)
     }
@@ -1476,6 +1559,8 @@ impl ProvisionService {
             created_at: now.clone(),
             updated_at: now,
             error: String::new(),
+            attempts: 0,
+            next_retry_at: None,
         };
         self.repo.record(&rec).await?;
         Ok(rec)
@@ -1502,14 +1587,17 @@ impl ProvisionService {
     /// eager dispatch and by the reconciler. Claims the row (only one worker wins),
     /// heartbeats while the connector runs, then records the terminal state. Apply
     /// also fulfills the workflow request. A failed apply/destroy is recorded with
-    /// its error (not retried in place — a `failed` row is re-requested, not re-armed).
+    /// its error and the next auto-retry armed (capped exponential backoff per the
+    /// service's policy); once the cap is hit the row rests as `failed` until a
+    /// manual `retry_resource`. The `failed`/`destroy_failed` states map back to
+    /// Apply/Destroy so a re-drive picks them up.
     async fn drive_core(&self, id: &str) -> Result<(), ProvisionError> {
         let Some(rec) = self.repo.get(id).await? else {
             return Ok(());
         };
         let action = match rec.state.as_str() {
-            "provisioning" => Action::Apply,
-            "destroying" => Action::Destroy,
+            "provisioning" | "failed" => Action::Apply,
+            "destroying" | "destroy_failed" => Action::Destroy,
             _ => return Ok(()),
         };
         let stale = stale_cutoff();
@@ -1541,16 +1629,27 @@ impl ProvisionService {
                     Action::Apply => "provisioned",
                     Action::Destroy => "destroyed",
                 };
-                self.repo.finish(id, terminal, &outputs, "").await?;
+                self.repo.finish(id, terminal, &outputs).await?;
                 Ok(())
             }
             Err(e) => {
+                // Record the failure and arm the next auto-retry: bump attempts and
+                // set the backoff deadline, or NULL once the per-service cap is hit
+                // (the row then rests as failed until a manual retry).
                 let terminal = match action {
                     Action::Apply => "failed",
                     Action::Destroy => "destroy_failed",
                 };
+                let policy = self.retry_policy_for(&rec.rtype);
+                let attempts = rec.attempts + 1;
+                let next = ((attempts as u32) < policy.max_attempts).then(|| {
+                    asgard_storage::plus_seconds(
+                        &asgard_storage::now(),
+                        backoff_secs(attempts, &policy),
+                    )
+                });
                 self.repo
-                    .finish(id, terminal, &rec.outputs, &e.to_string())
+                    .mark_failed(id, terminal, &e.to_string(), attempts, next.as_deref())
                     .await?;
                 Err(e)
             }
@@ -1601,6 +1700,7 @@ impl ProvisionService {
             config,
             estimated_monthly_usd: rec.est_monthly_usd,
             secret_outputs,
+            resource_id: Some(rec.id.clone()),
         };
         let plan = backend.plan(&preq).await?;
         let mut provisioned = backend.apply(&preq, &plan).await?;
@@ -1687,6 +1787,13 @@ impl ProvisionService {
         let mut n = 0;
         let stale = stale_cutoff();
         for rec in self.repo.list_reclaimable(&stale, 50).await? {
+            let _ = self.dispatch(&rec.id).await;
+            n += 1;
+        }
+        // Sweep 1b: auto-retry failed rows whose backoff has elapsed (capped rows
+        // have next_retry_at = NULL and are excluded). dispatch → drive_core re-drives.
+        let now = asgard_storage::now();
+        for rec in self.repo.list_retryable(&now, &stale, 50).await? {
             let _ = self.dispatch(&rec.id).await;
             n += 1;
         }
@@ -1908,6 +2015,24 @@ fn stale_cutoff() -> String {
     asgard_storage::plus_seconds(&asgard_storage::now(), -STALE_SECS)
 }
 
+/// A service's resolved auto-retry policy (manifest over deployment defaults).
+struct RetryPolicy {
+    max_attempts: u32,
+    base_secs: u64,
+    cap_secs: u64,
+}
+
+/// Backoff before retry number `attempts` (1-based): exponential off `base_secs`,
+/// capped at `cap_secs`. The shift is clamped so a large `max_attempts` can't
+/// overflow before the `.min(cap)` clamps it anyway.
+fn backoff_secs(attempts: i64, policy: &RetryPolicy) -> i64 {
+    let shift = (attempts - 1).clamp(0, 16) as u32;
+    policy
+        .base_secs
+        .saturating_mul(1u64 << shift)
+        .min(policy.cap_secs) as i64
+}
+
 fn ctx_from_record(rec: &ProvisionedRecord) -> ResourceContext {
     let g = |k: &str| rec.tags.get(k).cloned().unwrap_or_default();
     ResourceContext {
@@ -2097,6 +2222,8 @@ mod tests {
             created_at: now.clone(),
             updated_at: now,
             error: String::new(),
+            attempts: 0,
+            next_retry_at: None,
         };
         let id = rec.id.clone();
         svc.repo().record(&rec).await.unwrap();
@@ -2917,6 +3044,8 @@ mod tests {
             created_at: now.clone(),
             updated_at: now,
             error: String::new(),
+            attempts: 0,
+            next_retry_at: None,
         }
     }
 
@@ -3099,5 +3228,239 @@ mod tests {
             .unwrap();
         assert_eq!(second.provisioned.unwrap().id, id1);
         assert_eq!(svc.repo().list_by_project(&pid).await.unwrap().len(), 1);
+    }
+
+    // ---- run-log capture + auto-retry ----
+
+    /// A connector that fails its first `fails` applies then succeeds, recording a
+    /// run entry (with a known output) for each — mirrors the real connectors'
+    /// connector-sink capture so a test can assert both the run-log and the retry
+    /// bookkeeping.
+    struct FlakyProvisioner {
+        fails: Arc<AtomicUsize>,
+        applies: Arc<AtomicUsize>,
+        run_log: Option<Arc<RunLogStore>>,
+    }
+
+    impl FlakyProvisioner {
+        async fn record(&self, req: &ProvisionRequest, ok: bool, output: &str) {
+            if let (Some(store), Some(rid)) = (&self.run_log, &req.resource_id) {
+                let now = asgard_storage::now();
+                let _ = store
+                    .append(rid, &req.ctx.project_id, "apply", ok, output, &now, &now)
+                    .await;
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Provisioner for FlakyProvisioner {
+        fn name(&self) -> &str {
+            "flaky"
+        }
+        fn dry_run(&self) -> bool {
+            true
+        }
+        fn supports(&self, _r: &str) -> bool {
+            true
+        }
+        async fn plan(&self, req: &ProvisionRequest) -> Result<Plan, ProvisionError> {
+            Ok(Plan {
+                summary: String::new(),
+                tags: req.ctx.tags(),
+                estimated_monthly_usd: req.estimated_monthly_usd,
+            })
+        }
+        async fn apply(
+            &self,
+            req: &ProvisionRequest,
+            _plan: &Plan,
+        ) -> Result<Provisioned, ProvisionError> {
+            self.applies.fetch_add(1, Ordering::SeqCst);
+            if self.fails.load(Ordering::SeqCst) > 0 {
+                self.fails.fetch_sub(1, Ordering::SeqCst);
+                self.record(req, false, "boom: terraform apply failed")
+                    .await;
+                return Err(ProvisionError::Backend(
+                    "boom: terraform apply failed".into(),
+                ));
+            }
+            self.record(req, true, "Apply complete! Resources: 1 added")
+                .await;
+            Ok(Provisioned {
+                outputs: serde_json::json!({ "ok": true }),
+                resource_ids: vec![],
+                sensitive_keys: vec![],
+            })
+        }
+    }
+
+    fn failed_row(pid: &str, name: &str, next_retry_at: Option<&str>) -> ProvisionedRecord {
+        let mut rec = provisioning_row(pid, name);
+        rec.state = "failed".into();
+        rec.attempts = 1;
+        rec.next_retry_at = next_retry_at.map(str::to_string);
+        rec
+    }
+
+    #[tokio::test]
+    async fn drive_core_captures_run_output_on_failure_and_success() {
+        let (_wf, _reg, mut svc, pid) = harness().await;
+        let store = Arc::new(RunLogStore::new(svc.repo().db().clone(), [0x33; 32]));
+        svc.set_run_log(store.clone());
+        svc.register_backend(
+            "terraform",
+            Arc::new(FlakyProvisioner {
+                fails: Arc::new(AtomicUsize::new(1)),
+                applies: Arc::new(AtomicUsize::new(0)),
+                run_log: Some(store.clone()),
+            }),
+        );
+        let rec = provisioning_row(&pid, "cap");
+        svc.repo().record(&rec).await.unwrap();
+
+        // First drive fails: captured run (ok=false) + a failed row with the retry
+        // armed (attempts bumped, backoff deadline set).
+        assert!(svc.drive_core(&rec.id).await.is_err());
+        let runs = svc.resource_runs(&rec.id).await.unwrap();
+        assert_eq!(runs.len(), 1);
+        assert!(!runs[0].ok);
+        assert!(runs[0].output.contains("boom"));
+        let failed = svc.repo().get(&rec.id).await.unwrap().unwrap();
+        assert_eq!(failed.state, "failed");
+        assert_eq!(failed.attempts, 1);
+        assert!(failed.next_retry_at.is_some());
+
+        // Re-drive (the failed row maps to Apply): captured run (ok=true), the row
+        // converges to provisioned, and `finish` resets the retry bookkeeping.
+        svc.drive_core(&rec.id).await.unwrap();
+        let runs = svc.resource_runs(&rec.id).await.unwrap();
+        assert_eq!(runs.len(), 2);
+        assert!(runs[1].ok);
+        let done = svc.repo().get(&rec.id).await.unwrap().unwrap();
+        assert_eq!(done.state, "provisioned");
+        assert_eq!(done.attempts, 0);
+        assert!(done.next_retry_at.is_none());
+    }
+
+    #[tokio::test]
+    async fn list_retryable_respects_the_backoff_window() {
+        let (_wf, _reg, svc, pid) = harness().await;
+        let now = asgard_storage::now();
+        let past = asgard_storage::plus_seconds(&now, -10);
+        let future = asgard_storage::plus_seconds(&now, 600);
+        let due = failed_row(&pid, "due", Some(&past));
+        let pending = failed_row(&pid, "pending", Some(&future));
+        let capped = failed_row(&pid, "capped", None);
+        svc.repo().record(&due).await.unwrap();
+        svc.repo().record(&pending).await.unwrap();
+        svc.repo().record(&capped).await.unwrap();
+        let rows = svc.repo().list_retryable(&now, &now, 50).await.unwrap();
+        let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
+        assert!(ids.contains(&due.id.as_str()));
+        assert!(!ids.contains(&pending.id.as_str()));
+        assert!(!ids.contains(&capped.id.as_str()));
+    }
+
+    #[tokio::test]
+    async fn failed_apply_arms_backoff_then_caps_out_of_retryable() {
+        let (_wf, _reg, mut svc, pid) = harness().await;
+        svc.set_max_retries(2);
+        svc.register_backend(
+            "terraform",
+            Arc::new(FlakyProvisioner {
+                fails: Arc::new(AtomicUsize::new(usize::MAX)),
+                applies: Arc::new(AtomicUsize::new(0)),
+                run_log: None,
+            }),
+        );
+        let rec = provisioning_row(&pid, "perma");
+        svc.repo().record(&rec).await.unwrap();
+
+        // Attempt 1 fails: under the cap, so a retry is armed.
+        assert!(svc.drive_core(&rec.id).await.is_err());
+        let r1 = svc.repo().get(&rec.id).await.unwrap().unwrap();
+        assert_eq!(r1.attempts, 1);
+        assert!(r1.next_retry_at.is_some());
+
+        // Attempt 2 fails and hits the cap: next_retry_at cleared, so it drops out of
+        // the auto-retry sweep and rests as `failed`.
+        assert!(svc.drive_core(&rec.id).await.is_err());
+        let r2 = svc.repo().get(&rec.id).await.unwrap().unwrap();
+        assert_eq!(r2.attempts, 2);
+        assert!(r2.next_retry_at.is_none());
+        let now = asgard_storage::now();
+        let rows = svc.repo().list_retryable(&now, &now, 50).await.unwrap();
+        assert!(!rows.iter().any(|r| r.id == rec.id));
+    }
+
+    #[tokio::test]
+    async fn per_service_retry_policy_overrides_the_default() {
+        let (_wf, _reg, mut svc, pid) = harness().await;
+        let dir = std::env::temp_dir().join(format!("asgard-svc-{}", asgard_storage::new_uid()));
+        std::fs::create_dir_all(dir.join("zero-retry-svc")).unwrap();
+        std::fs::write(
+            dir.join("zero-retry-svc").join("service.yaml"),
+            "id: zero-retry-svc\n\
+             name: Zero Retry\n\
+             category: tooling\n\
+             auto_approvable: true\n\
+             required_fields: [name]\n\
+             provisioner:\n  connector: stub\n  config: {}\n\
+             retry:\n  max_attempts: 0\n  base_secs: 5\n  cap_secs: 50\n\
+             cost:\n  model: free\n  estimated_monthly_usd: 0.0\n  source:\n    type: none\n",
+        )
+        .unwrap();
+        svc.set_catalog(ServiceCatalog::load(Some(&dir)).unwrap());
+
+        // The manifest's retry block wins; a service with none inherits the defaults.
+        let zero = svc.retry_policy_for("zero-retry-svc");
+        assert_eq!(zero.max_attempts, 0);
+        assert_eq!(zero.base_secs, 5);
+        assert_eq!(zero.cap_secs, 50);
+        let dflt = svc.retry_policy_for("s3-bucket");
+        assert_eq!(dflt.max_attempts, MAX_RETRIES);
+        assert_eq!(dflt.base_secs, RETRY_BASE_SECS);
+
+        // Behaviorally: a failed apply for the zero-retry service arms no backoff, so
+        // it never enters the auto-retry sweep.
+        svc.register_backend(
+            "stub",
+            Arc::new(FlakyProvisioner {
+                fails: Arc::new(AtomicUsize::new(usize::MAX)),
+                applies: Arc::new(AtomicUsize::new(0)),
+                run_log: None,
+            }),
+        );
+        let mut rec = provisioning_row(&pid, "z");
+        rec.rtype = "zero-retry-svc".into();
+        svc.repo().record(&rec).await.unwrap();
+        assert!(svc.drive_core(&rec.id).await.is_err());
+        let got = svc.repo().get(&rec.id).await.unwrap().unwrap();
+        assert_eq!(got.state, "failed");
+        assert!(got.next_retry_at.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn retry_resource_rearms_a_capped_failed_row() {
+        let (_wf, _reg, mut svc, pid) = harness().await;
+        svc.register_backend(
+            "terraform",
+            Arc::new(FlakyProvisioner {
+                fails: Arc::new(AtomicUsize::new(0)),
+                applies: Arc::new(AtomicUsize::new(0)),
+                run_log: None,
+            }),
+        );
+        // A row that auto-retry has given up on (next_retry_at = NULL).
+        let mut rec = failed_row(&pid, "manual", None);
+        rec.attempts = 5;
+        svc.repo().record(&rec).await.unwrap();
+        // Manual retry re-arms it in place and drives it to success.
+        svc.retry_resource(&rec.id).await.unwrap();
+        let done = await_state(&svc, &rec.id, "provisioned").await;
+        assert_eq!(done.attempts, 0);
+        assert!(done.next_retry_at.is_none());
     }
 }

@@ -415,6 +415,16 @@ curl -fsS "$BASE/api/projects/${PID}/resources/${RID}" -o "$WORK/res_get.json"
 GS=$(jget "$WORK/res_get.json" "['state']")
 [[ "$GS" == "provisioned" ]] && ok "get_resource returns one resource by id (state=provisioned)" || bad "expected provisioned, got $GS"
 
+# 11a-bis. Run-log capture (audit): the connector's apply output is captured per
+# resource, encrypted at rest, behind the ViewAudit gate. The dev-insecure
+# session is a synthetic admin, so it can read the runs.
+curl -fsS "$BASE/api/projects/${PID}/resources/${RID}/runs" -o "$WORK/runs.json"
+RUNACT=$(jget "$WORK/runs.json" "[0]['action']")
+RUNOK=$(jget "$WORK/runs.json" "[0]['ok']")
+[[ "$RUNACT" == "apply" && "$RUNOK" == "True" ]] \
+  && ok "run-log captured the apply run (action=apply, ok=true)" \
+  || bad "expected an ok apply run, got action=$RUNACT ok=$RUNOK"
+
 # 11b. Deprovision: tear the resource down (connector destroy + record marked).
 curl -fsS -X DELETE "$BASE/api/projects/${PID}/resources/${RID}" -o "$WORK/deprov.json"
 DS=$(jget "$WORK/deprov.json" "['state']")
