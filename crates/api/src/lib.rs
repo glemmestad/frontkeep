@@ -295,7 +295,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/auth/me", get(me))
         .route("/api/auth/config", get(auth_config))
         .route("/api/auth/oidc/login", get(oidc_login))
-        .route("/api/auth/oidc/callback", get(oidc_callback));
+        .route("/api/auth/oidc/callback", get(oidc_callback))
+        // Skill install: a terminal `curl` reads these with a user PAT (no browser
+        // session), so they live on the open router and self-gate via session-or-PAT.
+        .route("/api/skills/{id}/raw/{*path}", get(skill_raw_file))
+        .route("/api/skills/{id}/install.sh", get(skill_install_sh));
 
     // No CORS layer: the dashboard is served same-origin from this binary, and the
     // API/MCP consumers are not browsers. Cross-origin browser access is therefore
@@ -1856,6 +1860,207 @@ async fn export_skill(
         "files": res.bundle.files,
         "loss": res.loss,
     })))
+}
+
+#[derive(Deserialize)]
+struct SkillInstallQ {
+    /// Install destination: `claude-code`, `codex`, or `cursor`. Defaults to the
+    /// skill's own runtime.
+    #[serde(default)]
+    dest: Option<String>,
+}
+
+/// Read-or-deny for the install endpoints. Unlike the human surface (`require_session`,
+/// session-only), a terminal `curl` install authenticates with the same user PAT
+/// (`asg_pat_…`) used to connect MCP. Allows a browser cookie, a session bearer, a user
+/// PAT, or the loopback dev hatch — never anonymous on an enforcing deployment.
+async fn session_or_pat(st: &AppState, headers: &HeaderMap) -> Result<(), ApiError> {
+    if st.dev_insecure {
+        return Ok(());
+    }
+    if let Some(token) = session_token(headers) {
+        if st.identity.validate_session(&token).await.is_ok()
+            || st.identity.validate_pat(&token).await.is_ok()
+        {
+            return Ok(());
+        }
+    }
+    Err(ApiError::Unauthorized(
+        "authentication required: present a session token or a user PAT (asg_pat_…)".into(),
+    ))
+}
+
+/// Best-effort public base URL (scheme + host) of this request, for embedding absolute
+/// links in a generated install script. Honors a fronting proxy's `X-Forwarded-Proto`/
+/// `X-Forwarded-Host`, falling back to the `Host` header and `http`.
+fn request_base_url(headers: &HeaderMap) -> String {
+    let scheme = if is_https(headers) { "https" } else { "http" };
+    let host = headers
+        .get("x-forwarded-host")
+        .or_else(|| headers.get(header::HOST))
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.split(',').next())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "localhost".to_string());
+    format!("{scheme}://{host}")
+}
+
+fn content_type_for(path: &str) -> &'static str {
+    match path.rsplit('.').next() {
+        Some("md") => "text/markdown; charset=utf-8",
+        Some("py") => "text/x-python; charset=utf-8",
+        Some("sh") => "text/x-shellscript; charset=utf-8",
+        Some("yaml") | Some("yml") => "application/yaml; charset=utf-8",
+        Some("json") => "application/json; charset=utf-8",
+        _ => "text/plain; charset=utf-8",
+    }
+}
+
+/// One file from a skill, translated to `runtime`, served raw — the unit the generated
+/// install script `curl`s. No base64.
+async fn skill_raw_file(
+    State(st): State<AppState>,
+    Path((id, path)): Path<(String, String)>,
+    Query(q): Query<SkillExportQ>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    session_or_pat(&st, &headers).await?;
+    let skill = st
+        .registry
+        .skill_get(&id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound(format!("skill {id}")))?;
+    let blob = st
+        .registry
+        .skill_get_bundle(&id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound(format!("skill {id}")))?;
+    let bundle =
+        asgard_skills::from_json(&blob).map_err(|e| ApiError::Internal(format!("bundle: {e}")))?;
+    let from = asgard_skills::Runtime::parse(&skill.runtime).unwrap_or_default();
+    let target = match q.runtime.as_deref() {
+        Some(s) => asgard_skills::Runtime::parse(s)
+            .ok_or_else(|| ApiError::BadRequest(format!("unknown runtime '{s}'")))?,
+        None => from,
+    };
+    let res = asgard_skills::translate(&bundle, from, target)
+        .map_err(|e| ApiError::BadRequest(e.to_string()))?;
+    let files = res
+        .bundle
+        .decoded()
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let bytes = files
+        .get(&path)
+        .ok_or_else(|| ApiError::NotFound(format!("file '{path}' in skill {id}")))?;
+    Ok((
+        [(header::CONTENT_TYPE, content_type_for(&path))],
+        bytes.clone(),
+    )
+        .into_response())
+}
+
+/// Limit a free-text skill name to a readable, shell-safe subset for a script comment.
+fn comment_safe(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '.' | '_' | '-'))
+        .take(60)
+        .collect()
+}
+
+fn render_install_sh(
+    base: &str,
+    id: &str,
+    dest: &asgard_skills::Destination,
+    slug: &str,
+    bundle: &asgard_skills::SkillBundle,
+    name: &str,
+) -> String {
+    let runtime = dest.runtime.as_str();
+    let default_dir = format!("{}/{slug}", dest.dir.replacen('~', "$HOME", 1));
+    let mut paths: Vec<&str> = bundle
+        .files
+        .iter()
+        .map(|f| f.path.as_str())
+        .filter(|p| asgard_skills::safe_path(p))
+        .collect();
+    paths.sort_unstable();
+    let mut subdirs: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    for p in &paths {
+        if let Some(idx) = p.rfind('/') {
+            subdirs.insert(&p[..idx]);
+        }
+    }
+    let mut s = String::new();
+    s.push_str("#!/bin/sh\n");
+    s.push_str(&format!(
+        "# Install the '{}' skill from Asgard into a {} skills directory.\n",
+        comment_safe(name),
+        dest.key
+    ));
+    s.push_str(&format!(
+        "# Run: curl -fsSL -H \"Authorization: Bearer $ASGARD_PAT\" \"{base}/api/skills/{id}/install.sh?dest={}\" | sh\n",
+        dest.key
+    ));
+    s.push_str("# Or pass a target directory:  sh install.sh /path/to/dir\n");
+    s.push_str("set -eu\n");
+    s.push_str(": \"${ASGARD_PAT:?set ASGARD_PAT to your Asgard user token (asg_pat_...)}\"\n");
+    s.push_str(&format!("dir=\"${{1:-{default_dir}}}\"\n"));
+    s.push_str("mkdir -p \"$dir\"\n");
+    for d in &subdirs {
+        s.push_str(&format!("mkdir -p \"$dir/{d}\"\n"));
+    }
+    s.push_str("fetch() {\n");
+    s.push_str(&format!(
+        "  curl -fsSL -H \"Authorization: Bearer $ASGARD_PAT\" \"{base}/api/skills/{id}/raw/$1?runtime={runtime}\" -o \"$dir/$1\"\n"
+    ));
+    s.push_str("}\n");
+    for p in &paths {
+        s.push_str(&format!("fetch \"{p}\"\n"));
+    }
+    s.push_str("echo \"Installed to $dir\"\n");
+    s
+}
+
+/// A ready-to-run `sh` installer that fetches each of the skill's files (translated for
+/// `dest`) from Asgard into the right per-runtime directory. Replaces the v1 base64
+/// snippet — the data is pulled at run time, not embedded.
+async fn skill_install_sh(
+    State(st): State<AppState>,
+    Path(id): Path<String>,
+    Query(q): Query<SkillInstallQ>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    session_or_pat(&st, &headers).await?;
+    let skill = st
+        .registry
+        .skill_get(&id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound(format!("skill {id}")))?;
+    let blob = st
+        .registry
+        .skill_get_bundle(&id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound(format!("skill {id}")))?;
+    let bundle =
+        asgard_skills::from_json(&blob).map_err(|e| ApiError::Internal(format!("bundle: {e}")))?;
+    let dest_key = q.dest.as_deref().unwrap_or(&skill.runtime);
+    let dest = asgard_skills::destination(dest_key).ok_or_else(|| {
+        ApiError::BadRequest(format!(
+            "unknown dest '{dest_key}' (expected claude-code, codex, or cursor)"
+        ))
+    })?;
+    let from = asgard_skills::Runtime::parse(&skill.runtime).unwrap_or_default();
+    let res = asgard_skills::translate(&bundle, from, dest.runtime)
+        .map_err(|e| ApiError::BadRequest(e.to_string()))?;
+    let base = request_base_url(&headers);
+    let slug = asgard_skills::slug(&skill.name);
+    let script = render_install_sh(&base, &id, dest, &slug, &res.bundle, &skill.name);
+    Ok((
+        [(header::CONTENT_TYPE, "text/x-shellscript; charset=utf-8")],
+        script,
+    )
+        .into_response())
 }
 
 /// Run the (advisory, escalate-only) machine code-review on a submitted skill and

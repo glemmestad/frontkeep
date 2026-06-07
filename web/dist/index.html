@@ -1149,22 +1149,13 @@
     function skillSlug(name) {
       return (name || 'skill').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-+|-+$)/g, '') || 'skill';
     }
-    // A copy-pasteable installer that recreates the skill folder from the bundle —
-    // the transport that needs no server-side file serving and works for both runtimes.
-    function installScript(runtime, slug, files) {
-      const base = runtime === 'codex' ? `~/.codex/skills/${slug}` : `~/.claude/skills/${slug}`;
-      const lines = [`mkdir -p ${base}`, `cd ${base}`];
-      const dirs = new Set();
-      files.forEach(f => { const d = f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : ''; if (d && !dirs.has(d)) { dirs.add(d); lines.push(`mkdir -p ${d}`); } });
-      files.forEach(f => lines.push(`echo '${f.content_b64}' | base64 -d > ${f.path}`));
-      return lines.join('\n');
-    }
-    function downloadBundle(filename, files) {
-      const blob = new Blob([JSON.stringify({ files }, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    }
+    // Install destinations: each runtime's skills dir + which translation it gets.
+    // Cursor reads the Agent Skills standard, so it takes the Claude Code rendering.
+    const SKILL_DESTS = {
+      'claude-code': { label: 'Claude Code', runtime: 'claude-code', dir: '~/.claude/skills' },
+      'codex': { label: 'Codex', runtime: 'codex', dir: '~/.codex/skills' },
+      'cursor': { label: 'Cursor', runtime: 'claude-code', dir: '~/.cursor/skills' },
+    };
     function reviewBox(rev) {
       if (!rev || !rev.disposition) return '';
       const disp = rev.disposition;
@@ -1319,29 +1310,35 @@
         async function renderExport(target) {
           const box = document.getElementById('sk-export');
           box.innerHTML = loading('Rendering…');
+          const d = SKILL_DESTS[target] || SKILL_DESTS['claude-code'];
           let ex;
-          try { ex = await api(`/api/skills/${encodeURIComponent(id)}/export?runtime=${encodeURIComponent(target)}`); }
+          try { ex = await api(`/api/skills/${encodeURIComponent(id)}/export?runtime=${encodeURIComponent(d.runtime)}`); }
           catch (e) { box.innerHTML = errBanner(e); return; }
-          const script = installScript(target, slug, ex.files);
-          const where = target === 'codex' ? '<code>~/.codex/skills/</code>' : '<code>~/.claude/skills/</code>';
+          const one = `curl -fsSL -H "Authorization: Bearer $ASGARD_PAT" "${location.origin}/api/skills/${id}/install.sh?dest=${target}" | sh`;
           const loss = (ex.loss || []).length
-            ? `<details style="margin-top:10px" open><summary class="muted" style="cursor:pointer;font-size:12px">Translation changes (${ex.loss.length}) — ${esc(s.runtime)} → ${esc(target)}</summary>
+            ? `<details style="margin-top:10px" open><summary class="muted" style="cursor:pointer;font-size:12px">Translation changes (${ex.loss.length}) — ${esc(s.runtime)} → ${esc(d.runtime)}</summary>
                 <ul style="font-size:12px;margin:6px 0">${ex.loss.map(l => `<li><strong>${esc(l.field)}</strong>: ${esc(l.action)} <span class="muted">(${esc(l.reason)})</span></li>`).join('')}</ul></details>`
-            : (target !== s.runtime ? '<div class="muted" style="font-size:12px;margin-top:8px">No changes needed — fully portable.</div>' : '');
+            : (d.runtime !== s.runtime ? '<div class="muted" style="font-size:12px;margin-top:8px">No changes needed — fully portable.</div>' : '');
           const skillMd = (ex.files.find(f => f.path === 'SKILL.md') || {}).content_b64;
-          box.innerHTML = `<p class="muted" style="font-size:12px">Run this to install the skill into ${where}</p>
-            ${snip(script)}
-            <div class="row" style="margin-top:8px"><button class="pbtn" id="sk-dl">Download bundle (.json)</button></div>
+          box.innerHTML = `<p class="muted" style="font-size:12px">Installs into <code>${esc(d.dir)}/${esc(slug)}/</code>. Set <code>$ASGARD_PAT</code> first (see Getting started), then run:</p>
+            ${snip(one)}
+            <details id="sk-preview" style="margin-top:8px"><summary class="muted" style="cursor:pointer;font-size:12px">Preview the install script</summary><div id="sk-script" style="margin-top:6px">${loading('Loading…')}</div></details>
             ${loss}
             <details style="margin-top:10px"><summary class="muted" style="cursor:pointer;font-size:12px">Files (${ex.files.length})</summary><ul style="font-size:12px;margin:6px 0">${ex.files.map(f => `<li><code>${esc(f.path)}</code></li>`).join('')}</ul></details>
             ${skillMd ? `<div class="md" style="margin-top:14px">${mdToHtml(b64text(skillMd))}</div>` : ''}`;
           wireCopy(box);
-          const dl = document.getElementById('sk-dl');
-          if (dl) dl.onclick = () => downloadBundle(`${slug}.${target}.json`, ex.files);
+          const prev = box.querySelector('#sk-preview');
+          let loaded = false;
+          prev.addEventListener('toggle', async () => {
+            if (!prev.open || loaded) return; loaded = true;
+            const tgt = document.getElementById('sk-script');
+            try { const txt = await api(`/api/skills/${encodeURIComponent(id)}/install.sh?dest=${encodeURIComponent(target)}`); tgt.innerHTML = snip(typeof txt === 'string' ? txt : JSON.stringify(txt)); wireCopy(tgt); }
+            catch (e) { tgt.innerHTML = errBanner(e); }
+          });
         }
         function wireRt() {
           const bar = document.getElementById('sk-rt');
-          bar.innerHTML = rtBtn('claude-code', 'Claude Code') + rtBtn('codex', 'Codex');
+          bar.innerHTML = Object.keys(SKILL_DESTS).map(k => rtBtn(k, SKILL_DESTS[k].label)).join('');
           bar.querySelectorAll('[data-rt]').forEach(b => b.onclick = () => { rt = b.dataset.rt; wireRt(); renderExport(rt); });
         }
         wireRt();
