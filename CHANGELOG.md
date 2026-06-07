@@ -1,3 +1,10 @@
+# [0.14.0](https://github.com/glemmestad/asgard/compare/v0.13.1...v0.14.0) (2026-06-07)
+
+
+### Features
+
+* **skills:** clean install — server install.sh + raw endpoint + MCP install (no base64) ([#34](https://github.com/glemmestad/asgard/issues/34)) ([79a8587](https://github.com/glemmestad/asgard/commit/79a858751ce499738b7013b88ac8db61597f644e))
+
 ## [0.13.1](https://github.com/glemmestad/asgard/compare/v0.13.0...v0.13.1) (2026-06-07)
 
 
