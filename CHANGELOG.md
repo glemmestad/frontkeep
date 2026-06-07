@@ -1,3 +1,10 @@
+# [0.15.0](https://github.com/glemmestad/asgard/compare/v0.14.0...v0.15.0) (2026-06-07)
+
+
+### Features
+
+* **provision:** run-log capture + auto-retry with per-service policy ([#35](https://github.com/glemmestad/asgard/issues/35)) ([d1ae473](https://github.com/glemmestad/asgard/commit/d1ae4739ef9f25537ef8562abdd7a8372f017a79))
+
 # [0.14.0](https://github.com/glemmestad/asgard/compare/v0.13.1...v0.14.0) (2026-06-07)
 
 
