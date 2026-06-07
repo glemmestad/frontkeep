@@ -60,6 +60,20 @@
         }
       }
     },
+    "long_running": {
+      "type": "boolean",
+      "description": "Latency hint: when true a provision request returns its `provisioning` record immediately (the apply runs in the background) instead of waiting the inline budget. Set on slow services (RDS, ALB, ECS). Not a correctness lever."
+    },
+    "retry": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Per-service auto-retry policy for a failed apply/destroy. Each field falls back to the deployment default when unset.",
+      "properties": {
+        "max_attempts": { "type": "integer", "minimum": 0, "description": "Max auto-retries before the row rests as failed (manual retry still available). 0 disables auto-retry for this service." },
+        "base_secs": { "type": "integer", "minimum": 1, "description": "First-retry backoff in seconds; doubles each attempt, capped at cap_secs." },
+        "cap_secs": { "type": "integer", "minimum": 1, "description": "Maximum backoff between retries, in seconds." }
+      }
+    },
     "tags": { "type": "array", "items": { "type": "string" } },
     "documentation": { "type": "string" }
   },

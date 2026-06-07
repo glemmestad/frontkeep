@@ -26,6 +26,13 @@ pub struct ProvisionedRecord {
     /// Failure detail for a `failed` / `destroy_failed` row; empty otherwise.
     #[serde(default)]
     pub error: String,
+    /// Count of failed apply/destroy tries (reset to 0 on success or manual retry).
+    #[serde(default)]
+    pub attempts: i64,
+    /// Backoff deadline for the next auto-retry of a failed row; `None` once the
+    /// row succeeds or hits its per-service retry cap.
+    #[serde(default)]
+    pub next_retry_at: Option<String>,
 }
 
 #[derive(Clone)]
@@ -45,8 +52,8 @@ impl ProvisionRepo {
     pub async fn record(&self, rec: &ProvisionedRecord) -> Result<(), ProvisionError> {
         sqlx::query(&self.db.q("INSERT INTO provisioned_resources \
              (id, project_id, rtype, name, spec, outputs, tags, est_monthly_usd, state, \
-              backend, dry_run, request_id, created_at, updated_at, error) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"))
+              backend, dry_run, request_id, created_at, updated_at, error, attempts, next_retry_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"))
         .bind(&rec.id)
         .bind(&rec.project_id)
         .bind(&rec.rtype)
@@ -62,6 +69,8 @@ impl ProvisionRepo {
         .bind(&rec.created_at)
         .bind(&rec.updated_at)
         .bind(&rec.error)
+        .bind(rec.attempts)
+        .bind(&rec.next_retry_at)
         .execute(self.db.pool())
         .await?;
         Ok(())
@@ -73,7 +82,7 @@ impl ProvisionRepo {
     ) -> Result<Vec<ProvisionedRecord>, ProvisionError> {
         let rows = sqlx::query(&self.db.q(
             "SELECT id, project_id, rtype, name, spec, outputs, tags, est_monthly_usd, state, \
-             backend, dry_run, request_id, created_at, updated_at, error \
+             backend, dry_run, request_id, created_at, updated_at, error, attempts, next_retry_at \
              FROM provisioned_resources WHERE project_id = ? ORDER BY created_at DESC",
         ))
         .bind(project_id)
@@ -91,7 +100,7 @@ impl ProvisionRepo {
     ) -> Result<Option<ProvisionedRecord>, ProvisionError> {
         let row = sqlx::query(&self.db.q(
             "SELECT id, project_id, rtype, name, spec, outputs, tags, est_monthly_usd, state, \
-             backend, dry_run, request_id, created_at, updated_at, error \
+             backend, dry_run, request_id, created_at, updated_at, error, attempts, next_retry_at \
              FROM provisioned_resources WHERE request_id = ? ORDER BY created_at LIMIT 1",
         ))
         .bind(request_id)
@@ -103,7 +112,7 @@ impl ProvisionRepo {
     pub async fn get(&self, id: &str) -> Result<Option<ProvisionedRecord>, ProvisionError> {
         let row = sqlx::query(&self.db.q(
             "SELECT id, project_id, rtype, name, spec, outputs, tags, est_monthly_usd, state, \
-             backend, dry_run, request_id, created_at, updated_at, error \
+             backend, dry_run, request_id, created_at, updated_at, error, attempts, next_retry_at \
              FROM provisioned_resources WHERE id = ?",
         ))
         .bind(id)
@@ -179,7 +188,7 @@ impl ProvisionRepo {
     ) -> Result<Option<ProvisionedRecord>, ProvisionError> {
         let row = sqlx::query(&self.db.q(
             "SELECT id, project_id, rtype, name, spec, outputs, tags, est_monthly_usd, state, \
-             backend, dry_run, request_id, created_at, updated_at, error \
+             backend, dry_run, request_id, created_at, updated_at, error, attempts, next_retry_at \
              FROM provisioned_resources \
              WHERE project_id = ? AND rtype = ? AND name = ? \
              AND state IN ('provisioning', 'provisioned') ORDER BY created_at DESC LIMIT 1",
@@ -203,7 +212,7 @@ impl ProvisionRepo {
     ) -> Result<Vec<ProvisionedRecord>, ProvisionError> {
         let sql = format!(
             "SELECT id, project_id, rtype, name, spec, outputs, tags, est_monthly_usd, state, \
-             backend, dry_run, request_id, created_at, updated_at, error \
+             backend, dry_run, request_id, created_at, updated_at, error, attempts, next_retry_at \
              FROM provisioned_resources \
              WHERE state IN ('provisioning', 'destroying') \
              AND (worker_owner IS NULL OR updated_at < ?) \
@@ -255,28 +264,94 @@ impl ProvisionRepo {
         Ok(())
     }
 
-    /// Terminal transition: set the final `state` (`provisioned`/`failed`/
-    /// `destroyed`/`destroy_failed`), persist `outputs` + `error`, and release the
-    /// claim (`worker_owner = NULL`).
+    /// Successful terminal transition (`provisioned`/`destroyed`): persist `outputs`,
+    /// clear `error`, release the claim, and reset the retry bookkeeping so a row
+    /// that failed-then-succeeded is clean.
     pub async fn finish(
         &self,
         id: &str,
         state: &str,
         outputs: &serde_json::Value,
-        error: &str,
     ) -> Result<(), ProvisionError> {
         sqlx::query(&self.db.q(
-            "UPDATE provisioned_resources SET state = ?, outputs = ?, error = ?, \
-             worker_owner = NULL, updated_at = ? WHERE id = ?",
+            "UPDATE provisioned_resources SET state = ?, outputs = ?, error = '', \
+             worker_owner = NULL, attempts = 0, next_retry_at = NULL, updated_at = ? WHERE id = ?",
         ))
         .bind(state)
         .bind(outputs.to_string())
-        .bind(error)
         .bind(asgard_storage::now())
         .bind(id)
         .execute(self.db.pool())
         .await?;
         Ok(())
+    }
+
+    /// Failed terminal transition (`failed`/`destroy_failed`): record the error,
+    /// bump `attempts`, set the backoff deadline (`next_retry_at`, `None` once the
+    /// per-service cap is hit so the row stops auto-retrying), and release the claim.
+    pub async fn mark_failed(
+        &self,
+        id: &str,
+        state: &str,
+        error: &str,
+        attempts: i64,
+        next_retry_at: Option<&str>,
+    ) -> Result<(), ProvisionError> {
+        sqlx::query(&self.db.q(
+            "UPDATE provisioned_resources SET state = ?, error = ?, attempts = ?, \
+             next_retry_at = ?, worker_owner = NULL, updated_at = ? WHERE id = ?",
+        ))
+        .bind(state)
+        .bind(error)
+        .bind(attempts)
+        .bind(next_retry_at)
+        .bind(asgard_storage::now())
+        .bind(id)
+        .execute(self.db.pool())
+        .await?;
+        Ok(())
+    }
+
+    /// Re-arm a `failed`/`destroy_failed` row for an immediate manual retry: flip it
+    /// back to the matching work state (`provisioning`/`destroying`) so the normal
+    /// dispatch + inline-wait path drives it, and reset the retry bookkeeping.
+    pub async fn reset_for_retry(&self, id: &str) -> Result<(), ProvisionError> {
+        sqlx::query(&self.db.q("UPDATE provisioned_resources SET \
+             state = CASE state WHEN 'failed' THEN 'provisioning' \
+                                WHEN 'destroy_failed' THEN 'destroying' ELSE state END, \
+             attempts = 0, next_retry_at = NULL, updated_at = ? WHERE id = ?"))
+        .bind(asgard_storage::now())
+        .bind(id)
+        .execute(self.db.pool())
+        .await?;
+        Ok(())
+    }
+
+    /// Failed rows whose backoff has elapsed and that no live worker is driving —
+    /// the auto-retry sweep. A row at its per-service cap has `next_retry_at = NULL`
+    /// (set by [`mark_failed`](Self::mark_failed)) so it's excluded here; the cap is
+    /// enforced at failure time, not in this query.
+    pub async fn list_retryable(
+        &self,
+        now: &str,
+        stale: &str,
+        limit: i64,
+    ) -> Result<Vec<ProvisionedRecord>, ProvisionError> {
+        let sql = format!(
+            "SELECT id, project_id, rtype, name, spec, outputs, tags, est_monthly_usd, state, \
+             backend, dry_run, request_id, created_at, updated_at, error, attempts, next_retry_at \
+             FROM provisioned_resources \
+             WHERE state IN ('failed', 'destroy_failed') \
+             AND next_retry_at IS NOT NULL AND next_retry_at <= ? \
+             AND (worker_owner IS NULL OR updated_at < ?) \
+             ORDER BY next_retry_at LIMIT {limit}"
+        );
+        let rows = sqlx::query(&self.db.q(&sql))
+            .bind(now)
+            .bind(stale)
+            .fetch_all(self.db.pool())
+            .await?;
+        Ok(rows.into_iter().map(row_to_record).collect())
     }
 
     /// Recurring infra cost estimate per project (provisioned resources only).
@@ -319,5 +394,7 @@ fn row_to_record(r: sqlx::any::AnyRow) -> ProvisionedRecord {
         created_at: r.get("created_at"),
         updated_at: r.get("updated_at"),
         error: r.get("error"),
+        attempts: r.get("attempts"),
+        next_retry_at: r.get("next_retry_at"),
     }
 }

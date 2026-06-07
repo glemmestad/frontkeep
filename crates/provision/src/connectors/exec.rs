@@ -168,6 +168,7 @@ mod tests {
             config,
             estimated_monthly_usd: 1.0,
             secret_outputs: vec![],
+            resource_id: None,
         }
     }
 

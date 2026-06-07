@@ -6,17 +6,39 @@
 //! `secret_outputs` get generated values routed to the secret store by the
 //! caller; only refs land in the resource record.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use serde_json::{Map, Value};
 
-use crate::{secrets, Plan, ProvisionError, ProvisionRequest, Provisioned, Provisioner};
+use crate::{
+    secrets, Plan, ProvisionError, ProvisionRequest, Provisioned, Provisioner, RunLogStore,
+};
 
 #[derive(Default)]
-pub struct StubProvisioner;
+pub struct StubProvisioner {
+    run_log: Option<Arc<RunLogStore>>,
+}
 
 impl StubProvisioner {
     pub fn new() -> Self {
-        StubProvisioner
+        StubProvisioner { run_log: None }
+    }
+
+    /// Attach the run-log store so the dry-run path also records a (synthetic) run
+    /// entry — keeps the audit surface demonstrable without a real cloud backend.
+    pub fn with_run_log(mut self, store: Arc<RunLogStore>) -> Self {
+        self.run_log = Some(store);
+        self
+    }
+
+    async fn record_run(&self, req: &ProvisionRequest, action: &str, output: &str) {
+        if let (Some(store), Some(rid)) = (&self.run_log, &req.resource_id) {
+            let now = asgard_storage::now();
+            let _ = store
+                .append(rid, &req.ctx.project_id, action, true, output, &now, &now)
+                .await;
+        }
     }
 }
 
@@ -73,11 +95,34 @@ impl Provisioner for StubProvisioner {
         for key in &req.secret_outputs {
             outputs.insert(key.clone(), Value::String(secrets::random_secret()));
         }
+        self.record_run(
+            req,
+            "apply",
+            &format!(
+                "[dry-run] applied {} '{}'\n{}",
+                req.resource_type, req.name, arn
+            ),
+        )
+        .await;
         Ok(Provisioned {
             outputs: Value::Object(outputs),
             resource_ids: vec![arn],
             sensitive_keys: req.secret_outputs.clone(),
         })
+    }
+
+    async fn destroy(
+        &self,
+        req: &ProvisionRequest,
+        _outputs: &Value,
+    ) -> Result<(), ProvisionError> {
+        self.record_run(
+            req,
+            "destroy",
+            &format!("[dry-run] destroyed {} '{}'", req.resource_type, req.name),
+        )
+        .await;
+        Ok(())
     }
 
     /// Simulate a successful suspend/resume so the governed kill→un-kill loop is

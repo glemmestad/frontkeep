@@ -841,6 +841,10 @@ mod tests {
         assert!(Role::Member.can(Provision));
         assert!(!Role::Member.can(ViewAllCost));
         assert!(!Role::Member.can(ApproveRequests));
+        // Run-logs (provision_runs) can carry provider secrets, so the read path is
+        // ViewAudit-only — a plain member must not reach it.
+        assert!(Role::Admin.can(ViewAudit));
+        assert!(!Role::Member.can(ViewAudit));
         assert_eq!(Role::parse("FINANCE"), Role::Finance);
         assert_eq!(Role::parse("manager"), Role::Member); // no global manager role
         assert_eq!(Role::parse("nonsense"), Role::Member);

@@ -99,6 +99,28 @@ pub struct ServiceManifest {
     /// ECS). Never a correctness lever — the durability is the same regardless.
     #[serde(default)]
     pub long_running: bool,
+    /// Per-service override of the auto-retry policy for a failed apply/destroy.
+    /// Absent ⇒ the deployment-wide default. A service can disable auto-retry
+    /// (`max_attempts: 0`) — e.g. expensive or destructive ones — or widen it for a
+    /// flaky external API.
+    #[serde(default)]
+    pub retry: Option<RetryCfg>,
+}
+
+/// Per-service retry policy. Each field falls back to the deployment default when
+/// unset, so a manifest can override just `max_attempts` and inherit the backoff.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetryCfg {
+    /// Max auto-retries of a failed apply/destroy before the row rests as `failed`
+    /// (manual retry still available). `0` disables auto-retry for this service.
+    #[serde(default)]
+    pub max_attempts: Option<u32>,
+    /// First-retry backoff in seconds (doubles each attempt, capped at `cap_secs`).
+    #[serde(default)]
+    pub base_secs: Option<u64>,
+    /// Maximum backoff between retries, in seconds.
+    #[serde(default)]
+    pub cap_secs: Option<u64>,
 }
 
 /// How a grant against a target resource is bound. `module` is the connector

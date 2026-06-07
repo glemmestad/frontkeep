@@ -194,6 +194,14 @@ pub fn router(state: AppState) -> Router {
             "/api/projects/{id}/resources/{rid}",
             get(get_resource).delete(deprovision_resource),
         )
+        .route(
+            "/api/projects/{id}/resources/{rid}/runs",
+            get(resource_runs),
+        )
+        .route(
+            "/api/projects/{id}/resources/{rid}/retry",
+            post(retry_resource),
+        )
         .route("/api/projects/{id}/secrets", get(list_project_secrets))
         .route(
             "/api/projects/{id}/secrets/{name}/rotate",
@@ -2083,6 +2091,51 @@ async fn deprovision_resource(
     }
     let destroyed = st.provision.deprovision(&rid, &q.actor).await?;
     Ok(Json(serde_json::to_value(destroyed).unwrap_or_default()))
+}
+
+/// The captured connector runs (apply/destroy plan+output, success and failure)
+/// for a resource. Gated to `ViewAudit` — the output can carry provider secrets,
+/// so it's encrypted at rest and admin/finance-only, the same trust model as
+/// `tf_state`. The resource must belong to the project in the path.
+async fn resource_runs(
+    State(st): State<AppState>,
+    Path((project_id, rid)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_cap(&st, &headers, asgard_identity::Capability::ViewAudit).await?;
+    let rec = st
+        .provision
+        .repo()
+        .get(&rid)
+        .await?
+        .ok_or_else(|| ApiError::NotFound(format!("resource {rid}")))?;
+    if rec.project_id != project_id {
+        return Err(ApiError::NotFound(format!("resource {rid}")));
+    }
+    let runs = st.provision.resource_runs(&rid).await?;
+    Ok(Json(serde_json::to_value(runs).unwrap_or_default()))
+}
+
+/// Manually retry a `failed` / `destroy_failed` resource now — re-arms it and
+/// drives it immediately, bypassing the backoff window. Project authority
+/// required (the same gate as deprovision); a no-op for any other state.
+async fn retry_resource(
+    State(st): State<AppState>,
+    Path((project_id, rid)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_project_authority(&st, &headers, &project_id).await?;
+    let rec = st
+        .provision
+        .repo()
+        .get(&rid)
+        .await?
+        .ok_or_else(|| ApiError::NotFound(format!("resource {rid}")))?;
+    if rec.project_id != project_id {
+        return Err(ApiError::NotFound(format!("resource {rid}")));
+    }
+    let rearmed = st.provision.retry_resource(&rid).await?;
+    Ok(Json(serde_json::to_value(rearmed).unwrap_or_default()))
 }
 
 /// The service catalog (manifest-driven). Human/programmatic mirror of the

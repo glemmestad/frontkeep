@@ -1900,6 +1900,45 @@ impl AsgardMcp {
     }
 
     #[tool(
+        description = "Read the captured connector run-log for a resource: the full terraform plan+apply output (or exec/HTTP output) of every attempt, success and failure, timestamped — for audit and debugging a provision. Requires a user token whose role holds ViewAudit (admin/finance); the output can carry provider secrets, so it is encrypted at rest and admin-gated."
+    )]
+    async fn resource_runs(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(a): Parameters<GetResourceArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        // Audit surface: a user token with ViewAudit (admin/finance) only, then
+        // the usual per-project authority check on the resolved record.
+        let (email, role) = match Self::auth(&ctx) {
+            Some(McpAuth::User { email, role }) => (email, role),
+            _ => return deny(
+                "reading a resource run-log requires a user token (asg_pat_…) with audit access"
+                    .into(),
+            ),
+        };
+        if !Role::parse(&role).can(asgard_identity::Capability::ViewAudit) {
+            return deny(format!(
+                "role '{role}' is not permitted to read resource run-logs (requires ViewAudit)"
+            ));
+        }
+        let rec = match self.provision.repo().get(&a.resource_id).await {
+            Ok(Some(r)) => r,
+            Ok(None) => return deny(format!("resource {} not found", a.resource_id)),
+            Err(e) => return deny(e.to_string()),
+        };
+        if let Err(e) = self.authorize_user(&email, &role, &rec.project_id).await {
+            return deny(e);
+        }
+        wrap(
+            self.provision
+                .resource_runs(&a.resource_id)
+                .await
+                .map(|runs| serde_json::to_string(&runs).unwrap_or_default())
+                .map_err(|e| e.to_string()),
+        )
+    }
+
+    #[tool(
         description = "Read the promotion checklist for a project: its current tier, the one tier it may move to, and the evidence verdict (missing required fields + exception signals) for that move. Use this to see what to close before requesting a promotion."
     )]
     async fn promotion_status(
@@ -2010,6 +2049,49 @@ impl AsgardMcp {
                 wrap(self.do_deprovision(scope.as_deref(), a).await)
             }
         }
+    }
+
+    #[tool(
+        description = "Manually retry a failed resource now (state failed or destroy_failed): re-arms it and drives it immediately, bypassing the auto-retry backoff window. A no-op for any other state. Use the resource id from request_resource or list_resources."
+    )]
+    async fn retry_resource(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(a): Parameters<GetResourceArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        // Same scoping as deprovision: the resource must belong to a project the
+        // caller is authorized for; the resource id is not a cross-project handle.
+        let rec = match self.provision.repo().get(&a.resource_id).await {
+            Ok(Some(r)) => r,
+            Ok(None) => return deny(format!("resource {} not found", a.resource_id)),
+            Err(e) => return deny(e.to_string()),
+        };
+        match Self::auth(&ctx) {
+            Some(McpAuth::User { email, role }) => {
+                if let Err(e) = self.authorize_user(&email, &role, &rec.project_id).await {
+                    return deny(e);
+                }
+            }
+            Some(McpAuth::Project { project_id }) => {
+                if rec.project_id != project_id {
+                    return deny(format!("resource {} not found", a.resource_id));
+                }
+            }
+            None => {
+                if let Some(scope) = &self.default_project {
+                    if &rec.project_id != scope {
+                        return deny(format!("resource {} not found", a.resource_id));
+                    }
+                }
+            }
+        }
+        wrap(
+            self.provision
+                .retry_resource(&a.resource_id)
+                .await
+                .map(|rec| serde_json::to_string(&rec).unwrap_or_default())
+                .map_err(|e| e.to_string()),
+        )
     }
 
     #[tool(
