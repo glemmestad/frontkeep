@@ -228,6 +228,16 @@ pub struct SkillsCatalogExportArgs {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct SkillsCatalogInstallArgs {
+    /// The skill id (see skills_catalog_list).
+    pub id: String,
+    /// Install destination: `claude-code`, `codex`, or `cursor`. Defaults to the
+    /// skill's own runtime.
+    #[serde(default)]
+    pub dest: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct CostReportArgs {
     pub by: Option<String>,
     pub since: Option<String>,
@@ -1055,6 +1065,65 @@ impl AsgardMcp {
         .map_err(|e| e.to_string())
     }
 
+    async fn do_skills_catalog_install(
+        &self,
+        a: SkillsCatalogInstallArgs,
+    ) -> Result<String, String> {
+        let skill = self
+            .registry
+            .skill_get(&a.id)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("unknown skill '{}'", a.id))?;
+        let blob = self
+            .registry
+            .skill_get_bundle(&a.id)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("unknown skill '{}'", a.id))?;
+        let bundle = asgard_skills::from_json(&blob).map_err(|e| e.to_string())?;
+        let dest_key = a.dest.as_deref().unwrap_or(&skill.runtime);
+        let dest = asgard_skills::destination(dest_key).ok_or_else(|| {
+            format!("unknown dest '{dest_key}' (expected claude-code, codex, or cursor)")
+        })?;
+        let from = asgard_skills::Runtime::parse(&skill.runtime).unwrap_or_default();
+        let res =
+            asgard_skills::translate(&bundle, from, dest.runtime).map_err(|e| e.to_string())?;
+        let decoded = res.bundle.decoded().map_err(|e| e.to_string())?;
+        let b64: std::collections::HashMap<&str, &str> = res
+            .bundle
+            .files
+            .iter()
+            .map(|f| (f.path.as_str(), f.content_b64.as_str()))
+            .collect();
+        // Decoded text where possible so the agent writes plain files; base64 only for
+        // the rare binary asset.
+        let files: Vec<serde_json::Value> = decoded
+            .iter()
+            .map(|(path, bytes)| match std::str::from_utf8(bytes) {
+                Ok(text) => {
+                    serde_json::json!({ "path": path, "content": text, "encoding": "utf-8" })
+                }
+                Err(_) => serde_json::json!({
+                    "path": path,
+                    "content": b64.get(path.as_str()).copied().unwrap_or(""),
+                    "encoding": "base64",
+                }),
+            })
+            .collect();
+        let dir = format!("{}/{}", dest.dir, asgard_skills::slug(&skill.name));
+        serde_json::to_string(&serde_json::json!({
+            "id": a.id,
+            "name": skill.name,
+            "dest": dest.key,
+            "runtime": dest.runtime.as_str(),
+            "dir": dir,
+            "files": files,
+            "loss": res.loss,
+        }))
+        .map_err(|e| e.to_string())
+    }
+
     async fn do_cost_report(&self, a: CostReportArgs) -> Result<String, String> {
         let by = CostDim::parse(a.by.as_deref().unwrap_or("project")).ok_or_else(|| {
             "by must be one of: project, owner, manager, group, classification, model, provider"
@@ -1717,6 +1786,16 @@ impl AsgardMcp {
         Parameters(a): Parameters<SkillsCatalogExportArgs>,
     ) -> Result<CallToolResult, McpError> {
         wrap(self.do_skills_catalog_export(a).await)
+    }
+
+    #[tool(
+        description = "Install a skill: returns the destination directory and the skill's files (translated for the runtime) as decoded text, so you write each file to <dir>/<path>. dest = claude-code | codex | cursor (default the skill's own runtime); cursor uses the Claude Code rendering. Read-only — it returns the files, you write them."
+    )]
+    async fn skills_catalog_install(
+        &self,
+        Parameters(a): Parameters<SkillsCatalogInstallArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        wrap(self.do_skills_catalog_install(a).await)
     }
 
     #[tool(

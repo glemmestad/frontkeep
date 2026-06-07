@@ -295,8 +295,8 @@ grep -q '"guidance_put"' "$WORK/tools.out" && ok "MCP exposes guidance tools (gu
 grep -q '"recipe_get"' "$WORK/tools.out" && ok "MCP exposes recipe tools (recipe_get)" || bad "recipe_get tool missing from MCP"
 grep -q '"mcp_catalog_list"' "$WORK/tools.out" && grep -q '"mcp_catalog_publish"' "$WORK/tools.out" \
   && ok "MCP exposes the catalog tools (mcp_catalog_list, mcp_catalog_publish)" || bad "mcp_catalog tools missing from MCP"
-grep -q '"skills_catalog_list"' "$WORK/tools.out" && grep -q '"skills_catalog_publish"' "$WORK/tools.out" && grep -q '"skills_catalog_export"' "$WORK/tools.out" \
-  && ok "MCP exposes the skills catalog tools (list, publish, export)" || bad "skills_catalog tools missing from MCP"
+grep -q '"skills_catalog_list"' "$WORK/tools.out" && grep -q '"skills_catalog_publish"' "$WORK/tools.out" && grep -q '"skills_catalog_export"' "$WORK/tools.out" && grep -q '"skills_catalog_install"' "$WORK/tools.out" \
+  && ok "MCP exposes the skills catalog tools (list, publish, export, install)" || bad "skills_catalog tools missing from MCP"
 grep -q '"request_promotion"' "$WORK/tools.out" && grep -q '"promotion_status"' "$WORK/tools.out" \
   && grep -q '"escalate_promotion"' "$WORK/tools.out" \
   && ok "MCP exposes promotion tools (request_promotion, promotion_status, escalate_promotion)" || bad "promotion tools missing from MCP"
@@ -684,6 +684,28 @@ python3 -c "import json,sys;f=json.load(open('$WORK/skexp.json'))['files'];sys.e
 curl -fsS "$BASE/api/skills/${SKID}/export?runtime=claude-code" -o "$WORK/skexp2.json"
 L2=$(python3 -c "import json;print(len(json.load(open('$WORK/skexp2.json'))['loss']))" 2>/dev/null)
 [[ "$L2" == "0" ]] && ok "export to the skill's own runtime is lossless" || bad "same-runtime export had loss ($L2)"
+# Raw endpoint serves the translated file as plain text (no base64). Codex strips
+# allowed-tools; a bundled script comes back verbatim.
+curl -fsS "$BASE/api/skills/${SKID}/raw/SKILL.md?runtime=codex" -o "$WORK/raw_skill.md"
+# The frontmatter key is gone (the body advisory may still name the field, by design).
+grep -q 'allowed-tools:' "$WORK/raw_skill.md" && bad "codex raw SKILL.md should strip the allowed-tools frontmatter" || ok "raw endpoint serves the codex-translated SKILL.md (allowed-tools frontmatter stripped, no base64)"
+curl -fsS "$BASE/api/skills/${SKID}/raw/scripts/run.sh?runtime=claude-code" -o "$WORK/raw_run.sh"
+grep -q 'echo hi' "$WORK/raw_run.sh" && ok "raw endpoint serves a bundled script verbatim" || bad "raw script wrong"
+# The generated install.sh is a clean fetch script that puts the files in the right
+# place. Run it against a temp dir and assert the files land on disk. dev-insecure
+# ignores the token, but the script still requires ASGARD_PAT to be set.
+curl -fsS "$BASE/api/skills/${SKID}/install.sh?dest=cursor" -o "$WORK/install.sh"
+grep -q 'base64' "$WORK/install.sh" && bad "install.sh must not use base64" || ok "install.sh is a clean fetch script (no base64)"
+grep -q '.cursor/skills' "$WORK/install.sh" && ok "install.sh targets the cursor skills dir" || bad "install.sh dest dir wrong"
+ASGARD_PAT=dev sh "$WORK/install.sh" "$WORK/skilldest" >/dev/null 2>&1
+[[ -f "$WORK/skilldest/SKILL.md" && -f "$WORK/skilldest/scripts/run.sh" ]] && ok "install.sh fetches the skill's files onto disk" || bad "install.sh did not write the expected files"
+grep -q 'allowed-tools' "$WORK/skilldest/SKILL.md" && ok "cursor install keeps the Claude-format SKILL.md" || bad "cursor SKILL.md unexpectedly altered"
+# MCP install: returns the destination dir + decoded files for an agent to write.
+SKINST="{\"jsonrpc\":\"2.0\",\"id\":12,\"method\":\"tools/call\",\"params\":{\"name\":\"skills_catalog_install\",\"arguments\":{\"id\":\"${SKID}\",\"dest\":\"cursor\"}}}"
+curl -s -o "$WORK/skinst.out" -X POST "$BASE/mcp" -H "authorization: Bearer $KEY" -H "mcp-session-id: $SID" \
+  -H 'content-type: application/json' -H "$MCP_ACCEPT" -d "$SKINST"
+grep -q '.cursor/skills' "$WORK/skinst.out" && grep -q 'SKILL.md' "$WORK/skinst.out" \
+  && ok "MCP skills_catalog_install returns the dir + files for the agent to write" || { bad "skills_catalog_install wrong"; cat "$WORK/skinst.out"; }
 # Lifecycle: disable hides from the active catalog; enable restores.
 curl -fsS -X POST "$BASE/api/skills/${SKID}/disable" -o /dev/null
 curl -fsS "$BASE/api/skills" -o "$WORK/skcat2.json"

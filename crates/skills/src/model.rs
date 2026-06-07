@@ -114,12 +114,21 @@ pub(crate) fn encode_b64(bytes: &[u8]) -> String {
     STANDARD.encode(bytes)
 }
 
-fn is_safe_path(p: &str) -> bool {
-    !(p.is_empty()
-        || p.starts_with('/')
-        || p.contains('\\')
-        || p.split('/').any(|seg| seg == "..")
-        || p.chars().any(|c| c.is_control()))
+/// A bundle-relative path safe to write to disk and to interpolate into a generated
+/// shell installer: relative, no `.`/`..`/empty segments, and every segment limited to
+/// `[A-Za-z0-9._-]` (so no spaces, quotes, or shell metacharacters can ride through).
+pub fn safe_path(p: &str) -> bool {
+    if p.is_empty() || p.starts_with('/') {
+        return false;
+    }
+    p.split('/').all(|seg| {
+        !seg.is_empty()
+            && seg != "."
+            && seg != ".."
+            && seg
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    })
 }
 
 /// Split a `---`-fenced YAML frontmatter block off the front of a Markdown doc.
@@ -179,7 +188,7 @@ pub fn validate(bundle: &SkillBundle) -> Result<(), SkillError> {
     let mut total = 0usize;
     let mut has_skill_md = false;
     for f in &bundle.files {
-        if !is_safe_path(&f.path) {
+        if !safe_path(&f.path) {
             return Err(SkillError::Bundle(format!(
                 "unsafe or invalid path '{}'",
                 f.path
