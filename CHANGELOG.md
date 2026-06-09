@@ -1,3 +1,10 @@
+## [0.18.2](https://github.com/glemmestad/asgard/compare/v0.18.1...v0.18.2) (2026-06-09)
+
+
+### Bug Fixes
+
+* **provision:** bound terraform subprocess and unstick stale provisioning rows ([#40](https://github.com/glemmestad/asgard/issues/40)) ([f900056](https://github.com/glemmestad/asgard/commit/f9000564d64ab555d85c430b17435740413d17a0))
+
 ## [0.18.1](https://github.com/glemmestad/asgard/compare/v0.18.0...v0.18.1) (2026-06-09)
 
 
