@@ -44,16 +44,16 @@ each client.
 
 `claude mcp add` **bakes the header value at add-time** — the shell expands the
 token then and stores it in `~/.claude.json`. So put the real token in the command;
-an unset `$ASGARD_PAT` would silently store an empty bearer and every call would
+an unset `$FRONTKEEP_PAT` would silently store an empty bearer and every call would
 fail with `401`:
 
 ```sh
-claude mcp add --transport http asgard https://<host>/mcp \
+claude mcp add --transport http frontkeep https://<host>/mcp \
   --header "Authorization: Bearer asg_pat_your_user_token"
 ```
 
 To keep the token out of `~/.claude.json`, export it (`export
-ASGARD_PAT=asg_pat_…`) and use `$ASGARD_PAT` in the header instead — but only if
+FRONTKEEP_PAT=asg_pat_…`) and use `$FRONTKEEP_PAT` in the header instead — but only if
 it's set in the shell you run the command in, since it's expanded immediately.
 
 Then `claude mcp list` should show `asgard` connected, and the Frontkeep tools
@@ -68,7 +68,7 @@ environment at call time, so the token never lands in the file:
 ```toml
 [mcp_servers.asgard]
 url = "https://<host>/mcp"
-bearer_token_env_var = "ASGARD_PAT"
+bearer_token_env_var = "FRONTKEEP_PAT"
 ```
 
 ### Cursor / generic Streamable-HTTP clients
@@ -81,7 +81,7 @@ project `.cursor/mcp.json`):
   "mcpServers": {
     "asgard": {
       "url": "https://<host>/mcp",
-      "headers": { "Authorization": "Bearer ${ASGARD_PAT}" }
+      "headers": { "Authorization": "Bearer ${FRONTKEEP_PAT}" }
     }
   }
 }
@@ -103,7 +103,7 @@ For a local instance, run the server over stdio instead of HTTP — no token nee
 (local trust); set the default project via env:
 
 ```sh
-ASGARD_PROJECT=proj-2026-0001 asgard mcp
+FRONTKEEP_PROJECT=proj-2026-0001 frontkeep mcp
 ```
 
 Wire it as a stdio MCP server in your client (command `asgard`, args `mcp`).
@@ -114,7 +114,7 @@ Wire it as a stdio MCP server in your client (command `asgard`, args `mcp`).
   "Create a PAT"). It's shown once; store it like a password. Revoke it any time.
   This is the agent credential: it can register projects and acts as you across
   the projects you own or manage. On a fresh deploy with no users yet, the
-  operator mints the first one with `asgard admin bootstrap` (see
+  operator mints the first one with `frontkeep admin bootstrap` (see
   [Deploy → The first credential](deploy.md#the-first-credential)).
 - **Project key** — minted per **registered project** (dashboard, or your agent
   calling `gateway_credential`). Use it for an app/CI scoped to one project, or as

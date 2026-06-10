@@ -753,15 +753,15 @@ mod tests {
 
     #[test]
     fn config_defaults_source_env_yield_to_spec_and_drop_when_unset() {
-        std::env::set_var("ASGARD_TEST_DEF_SUBNET", "subnet-grp-1");
-        std::env::set_var("ASGARD_TEST_DEF_SGS", "sg-1, sg-2");
-        std::env::remove_var("ASGARD_TEST_DEF_REGION");
+        std::env::set_var("FRONTKEEP_TEST_DEF_SUBNET", "subnet-grp-1");
+        std::env::set_var("FRONTKEEP_TEST_DEF_SGS", "sg-1, sg-2");
+        std::env::remove_var("FRONTKEEP_TEST_DEF_REGION");
         let mut r = req();
         r.spec = serde_json::json!({"name": "db", "instance_class": "db.t3.small"});
         r.config = serde_json::json!({"defaults": {
-            "subnet_group_name": "${ASGARD_TEST_DEF_SUBNET}",
-            "vpc_security_group_ids": "${ASGARD_TEST_DEF_SGS:csv}",
-            "region": "${ASGARD_TEST_DEF_REGION}",
+            "subnet_group_name": "${FRONTKEEP_TEST_DEF_SUBNET}",
+            "vpc_security_group_ids": "${FRONTKEEP_TEST_DEF_SGS:csv}",
+            "region": "${FRONTKEEP_TEST_DEF_REGION}",
             "instance_class": "db.t3.micro"
         }});
         let v = tfvars(&r, &plan(), &Value::Null);
@@ -776,8 +776,8 @@ mod tests {
             serde_json::json!("db.t3.small"),
             "the request spec overrides a manifest default"
         );
-        std::env::remove_var("ASGARD_TEST_DEF_SUBNET");
-        std::env::remove_var("ASGARD_TEST_DEF_SGS");
+        std::env::remove_var("FRONTKEEP_TEST_DEF_SUBNET");
+        std::env::remove_var("FRONTKEEP_TEST_DEF_SGS");
     }
 
     /// The durability guarantee, without needing terraform installed: state

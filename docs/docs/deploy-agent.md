@@ -19,12 +19,12 @@ this file is the checklist.
 Collect these before starting. Stop and ask a human for any you cannot derive.
 
 - `HOST` — the public hostname Frontkeep will be reached at (behind your TLS ingress).
-- `ASGARD_SECRET_KEY` — 64 hex chars (32 bytes), from the org KMS. Generate with
+- `FRONTKEEP_SECRET_KEY` — 64 hex chars (32 bytes), from the org KMS. Generate with
   `openssl rand -hex 32` only for a throwaway trial.
 - `DB` — `postgres://USER:PASS@HOST:5432/asgard` for a pilot; `sqlite:///data/asgard.db` for a box trial.
-- `ASGARD_ADMIN_PASSWORD` — optional; if omitted, capture the generated one from the boot log.
-- `ASGARD_SYSTEM_NAME` — optional; UI display name to rebrand the dashboard to (e.g. `Acme Control Plane`). Cosmetic only; defaults to `Frontkeep`.
-- `[ENTERPRISE]` OIDC web-app: `ASGARD_OIDC_DOMAIN`, `ASGARD_OIDC_CLIENT_ID`, `ASGARD_OIDC_CLIENT_SECRET`, and the callback URL `https://HOST/api/auth/oidc/callback` registered in the IdP.
+- `FRONTKEEP_ADMIN_PASSWORD` — optional; if omitted, capture the generated one from the boot log.
+- `FRONTKEEP_SYSTEM_NAME` — optional; UI display name to rebrand the dashboard to (e.g. `Acme Control Plane`). Cosmetic only; defaults to `Frontkeep`.
+- `[ENTERPRISE]` OIDC web-app: `FRONTKEEP_OIDC_DOMAIN`, `FRONTKEEP_OIDC_CLIENT_ID`, `FRONTKEEP_OIDC_CLIENT_SECRET`, and the callback URL `https://HOST/api/auth/oidc/callback` registered in the IdP.
 - `[ENTERPRISE]` Auth0 M2M for provisioning: `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET` (authorized for the Management API).
 
 ## Step 1 — Database
@@ -34,7 +34,7 @@ POC (SQLite): nothing to do; the binary creates and migrates it.
 Pilot (Postgres):
 ```bash
 docker run -d --name asgard-pg \
-  -e POSTGRES_PASSWORD="$PGPASS" -e POSTGRES_DB=asgard \
+  -e POSTGRES_PASSWORD="$PGPASS" -e POSTGRES_DB=frontkeep \
   -p 5432:5432 -v asgard-pg:/var/lib/postgresql/data postgres:16-alpine
 ```
 **Verify:** `docker exec asgard-pg pg_isready -U postgres` prints `accepting connections`.
@@ -53,10 +53,10 @@ with policy-doc defaults; see the operator guide's `asgard.yaml` reference.)
 ## Step 3 — Boot
 
 ```bash
-ASGARD_DATABASE_URL="$DB" \
-ASGARD_SECRET_KEY="$ASGARD_SECRET_KEY" \
-ASGARD_ADMIN_PASSWORD="${ASGARD_ADMIN_PASSWORD:-}" \
-asgard serve --bind 0.0.0.0:8080 --config ./asgard.yaml
+FRONTKEEP_DATABASE_URL="$DB" \
+FRONTKEEP_SECRET_KEY="$FRONTKEEP_SECRET_KEY" \
+FRONTKEEP_ADMIN_PASSWORD="${FRONTKEEP_ADMIN_PASSWORD:-}" \
+frontkeep serve --bind 0.0.0.0:8080 --config ./asgard.yaml
 ```
 On **Postgres**, `desired_count > 1` is safe — the background loops are leader-leased
 and Terraform applies take per-resource locks (failover bounded by `lease_ttl_secs`,
@@ -64,7 +64,7 @@ default 600s). On **SQLite**, run exactly one replica (a local file with one wri
 
 **Verify:** `curl -fsS http://localhost:8080/healthz` returns `ok` (liveness) and
 `curl -fsS http://localhost:8080/readyz` returns `ready` (DB reachable). If
-`ASGARD_ADMIN_PASSWORD` was empty, grep the log for `password:` and record the
+`FRONTKEEP_ADMIN_PASSWORD` was empty, grep the log for `password:` and record the
 generated admin credentials.
 
 ## Step 4 — Confirm enforcement
@@ -74,7 +74,7 @@ generated admin credentials.
 test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/projects)" = 401
 ```
 A human/admin route must return `401` without a session. If it returns `200`, the
-dev escape hatch is on — ensure `ASGARD_DEV_INSECURE` is unset for a deployment.
+dev escape hatch is on — ensure `FRONTKEEP_DEV_INSECURE` is unset for a deployment.
 
 ## Step 5 — Onboard a project and mint a key
 
@@ -110,9 +110,9 @@ curl -s -X POST http://localhost:8080/mcp -H "authorization: Bearer $KEY" \
 
 Restart the process with the OIDC env set:
 ```bash
-ASGARD_OIDC_DOMAIN=... ASGARD_OIDC_CLIENT_ID=... ASGARD_OIDC_CLIENT_SECRET=... \
-ASGARD_OIDC_REDIRECT_URI=https://$HOST/api/auth/oidc/callback \
-asgard serve --bind 0.0.0.0:8080 --config ./asgard.yaml
+FRONTKEEP_OIDC_DOMAIN=... FRONTKEEP_OIDC_CLIENT_ID=... FRONTKEEP_OIDC_CLIENT_SECRET=... \
+FRONTKEEP_OIDC_REDIRECT_URI=https://$HOST/api/auth/oidc/callback \
+frontkeep serve --bind 0.0.0.0:8080 --config ./asgard.yaml
 ```
 **Verify:** `curl -s https://$HOST/api/auth/config` returns `"oidc":true`, and a
 browser round-trip `GET /api/auth/oidc/login` → IdP → callback lands on `/` with a
@@ -124,18 +124,18 @@ break-glass.
 Container-first (no config file) — set on the Frontkeep process (the image bundles
 `terraform` on `PATH` and the modules at `/modules`):
 ```bash
-ASGARD_TF_MODULES_DIR=/modules
-ASGARD_TF_WORK_DIR=/data/asgard-tf      # scratch only; can be ephemeral
-ASGARD_TF_ALLOWED=auth0:your-tenant     # OPTIONAL multi-account guardrail
+FRONTKEEP_TF_MODULES_DIR=/modules
+FRONTKEEP_TF_WORK_DIR=/data/asgard-tf      # scratch only; can be ephemeral
+FRONTKEEP_TF_ALLOWED=auth0:your-tenant     # OPTIONAL multi-account guardrail
 
 # AWS resources (region + account are AWS-wide; subnet/SG are RDS placement):
 AWS_DEFAULT_REGION=us-west-2            # standard provider env — all AWS modules
-ASGARD_AWS_DEFAULT_ACCOUNT=123456789012 # default target + attribution account
-ASGARD_RDS_SUBNET_GROUP=my-db-subnets   # RDS-only; omit → default VPC
-ASGARD_RDS_SECURITY_GROUP_IDS=sg-123,sg-456
+FRONTKEEP_AWS_DEFAULT_ACCOUNT=123456789012 # default target + attribution account
+FRONTKEEP_RDS_SUBNET_GROUP=my-db-subnets   # RDS-only; omit → default VPC
+FRONTKEEP_RDS_SECURITY_GROUP_IDS=sg-123,sg-456
 AUTH0_DOMAIN=... AUTH0_CLIENT_ID=... AUTH0_CLIENT_SECRET=...   # M2M provider creds
 ```
-Region and account are **AWS-wide** (every AWS module uses them); `ASGARD_RDS_*`
+Region and account are **AWS-wide** (every AWS module uses them); `FRONTKEEP_RDS_*`
 are RDS-only network placement. AWS provider creds come from the IAM role/instance
 profile Frontkeep runs under. Or via `asgard.yaml` when you want the other
 provisioning knobs in one place:
@@ -147,7 +147,7 @@ provisioning:
 ```
 Either way the M2M creds go **on the Frontkeep process** (the Terraform child inherits
 them). **Terraform state is persisted (encrypted) in Frontkeep's database** and
-hydrated back per run, so `ASGARD_TF_WORK_DIR` is just scratch and may be ephemeral
+hydrated back per run, so `FRONTKEEP_TF_WORK_DIR` is just scratch and may be ephemeral
 — back up the DB and you've backed up provisioning state too.
 **Verify:** request `auth0-application` over `/mcp` (`request_resource`) for a
 registered project; the request reaches `fulfilled` and the created app's
@@ -209,7 +209,7 @@ real load-balanced service. Inputs: `VPC_ID`, `SUBNET_IDS` (≥2 AZs), `CERT_ARN
      "certificate_arn": "<CERT_ARN>",
      "idle_timeout": 900,
      "desired_count": 1,
-     "env": { "ASGARD_DATABASE_URL_SECRET_ARN": "<DB_SECRET_ARN>", "ASGARD_SECRET_KEY_SECRET_ARN": "<KEY_SECRET_ARN>" },
+     "env": { "FRONTKEEP_DATABASE_URL_SECRET_ARN": "<DB_SECRET_ARN>", "FRONTKEEP_SECRET_KEY_SECRET_ARN": "<KEY_SECRET_ARN>" },
      "grants": { "secrets_read": ["<DB_SECRET_ARN>", "<KEY_SECRET_ARN>"], "kms_decrypt": ["<KMS_ARN>"] }
    }
    ```

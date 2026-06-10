@@ -49,6 +49,6 @@ recipes, served to humans in the UI and to agents over MCP.
 - **Open core with honest seams.** The governance core is OSS; enterprise
   features (SAML/SCIM, multi-tenant, SIEM streaming) sit behind clear trait seams.
 
-> The CLI binary, env vars (`ASGARD_*`), and the on-disk database file are still
-> named `asgard` while the rebrand to Frontkeep rolls out. The product is
-> Frontkeep; the binary will follow in a later release.
+> The default SQLite filename is still `asgard.db` so an existing deploy's data
+> survives an in-place upgrade. Legacy `ASGARD_*` env vars continue to work
+> transparently — set either name; the new one wins when both are set.

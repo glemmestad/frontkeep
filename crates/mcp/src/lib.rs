@@ -13,7 +13,7 @@
 //! extension) to each tool, so project-scoped tools (`request_resource`,
 //! `get_secret`, …) authorize the target project per [`AsgardMcp::resolve_project`]
 //! — a project id is never a spoofable argument. Over stdio there is no token; the
-//! project comes from `ASGARD_PROJECT` (local trust), passed as `default_project`.
+//! project comes from `FRONTKEEP_PROJECT` (local trust), passed as `default_project`.
 
 use std::sync::Arc;
 
@@ -60,7 +60,7 @@ pub struct AsgardMcp {
     registry: ProjectRegistry,
     workflow: Arc<WorkflowEngine>,
     provision: ProvisionService,
-    /// stdio/local fallback project (from `ASGARD_PROJECT`); `None` over HTTP,
+    /// stdio/local fallback project (from `FRONTKEEP_PROJECT`); `None` over HTTP,
     /// where the project comes from the authenticated key instead.
     default_project: Option<String>,
     tool_router: ToolRouter<Self>,
@@ -2659,7 +2659,7 @@ impl ServerHandler for AsgardMcp {
             .enable_tools()
             .enable_prompts()
             .build();
-        info.server_info = Implementation::new("asgard", env!("CARGO_PKG_VERSION"));
+        info.server_info = Implementation::new("frontkeep", env!("CARGO_PKG_VERSION"));
         info.instructions = Some(
             "Governance control plane. Connect with a user token to register projects \
              and manage every project you own/manage, or a project key scoped to \
@@ -2781,7 +2781,7 @@ async fn mcp_auth(State(st): State<McpAuthState>, mut req: Request, next: Next) 
         .and_then(|s| s.strip_prefix("Bearer "))
         .map(str::to_string);
     let origin = self_origin(&req);
-    // An unset $ASGARD_PAT expands to nothing in the client's `claude mcp add`, so
+    // An unset $FRONTKEEP_PAT expands to nothing in the client's `claude mcp add`, so
     // the stored header is `Bearer ` and the token arrives empty — the single most
     // common first-run failure. Name it instead of treating it as a bad key.
     let token = match token {
@@ -2791,7 +2791,7 @@ async fn mcp_auth(State(st): State<McpAuthState>, mut req: Request, next: Next) 
                 StatusCode::UNAUTHORIZED,
                 format!(
                     "no bearer token on the request. If you added the MCP server with \
-                     `$ASGARD_PAT`, it was unset when the command ran (the value is baked in \
+                     `$FRONTKEEP_PAT`, it was unset when the command ran (the value is baked in \
                      at add-time). Mint a PAT at {origin} → Get Started and put it in the \
                      Authorization header."
                 ),
@@ -2988,7 +2988,7 @@ mod tests {
     async fn get_info_declares_tools_and_prompts() {
         let s = server(None).await;
         let info = s.get_info();
-        assert_eq!(info.server_info.name, "asgard");
+        assert_eq!(info.server_info.name, "frontkeep");
         assert!(info.capabilities.tools.is_some());
         assert!(info.capabilities.prompts.is_some());
     }

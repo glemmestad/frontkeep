@@ -40,21 +40,24 @@ It's a **hub, not a workflow engine**: Frontkeep serves the standards, mints the
 ```sh
 # SQLite, no external services, no login on loopback — browse the UI at http://localhost:8080
 cargo run -p asgard -- serve --database-url sqlite://asgard.db
-# (set ASGARD_DEV_INSECURE=1 to skip auth on loopback while exploring)
+# (set FRONTKEEP_DEV_INSECURE=1 to skip auth on loopback while exploring)
 ```
 
-Then connect an agent to the **MCP front door** — the Getting Started tab in the UI mints a Personal Access Token and shows the exact snippet for Claude Code, Codex, and Cursor. Or drive it from the CLI — the same binary, [installed](docs/docs/install.md) and authenticated with that same PAT (`asgard login`, or `ASGARD_PAT`/`ASGARD_URL`):
+Then connect an agent to the **MCP front door** — the Getting Started tab in the UI mints a Personal Access Token and shows the exact snippet for Claude Code, Codex, and Cursor. Or drive it from the CLI — the same binary, [installed](docs/docs/install.md) and authenticated with that same PAT (`frontkeep login`, or `FRONTKEEP_PAT`/`FRONTKEEP_URL`):
 
 ```sh
-asgard project register --name "My Service" --owner you@corp.example \
+frontkeep project register --name "My Service" --owner you@corp.example \
   --manager you@corp.example --group platform --classification poc   # the gate; mints proj-YYYY-NNNN
-asgard project credential proj-2026-0001                             # mint the project's gateway key
-asgard catalog services                                              # what's provisionable
-asgard cost report --by group                                        # spend rolled up by dimension
-asgard validate services/s3-bucket/service.yaml                      # offline manifest check
+frontkeep project credential proj-2026-0001                             # mint the project's gateway key
+frontkeep catalog services                                              # what's provisionable
+frontkeep cost report --by group                                        # spend rolled up by dimension
+frontkeep validate services/s3-bucket/service.yaml                      # offline manifest check
 ```
 
-> The CLI binary, env vars (`ASGARD_*`), and the on-disk database file are still named `asgard` while the rebrand to Frontkeep rolls out. The product is Frontkeep; the binary will follow in a later release.
+> The default SQLite filename is still `asgard.db` so an existing deploy's data
+> survives an in-place upgrade. Override it with `--database-url` if you'd
+> rather start fresh on `frontkeep.db`. Legacy `ASGARD_*` env vars continue to
+> work transparently — set either name; the new one wins when both are set.
 
 See [`docs/docs/`](docs/docs/) for [installing the CLI](docs/docs/install.md), [using the CLI](docs/docs/cli.md), the [onboarding loop](docs/docs/onboarding-loop.md), [connecting an agent](docs/docs/connect-agent.md), [deploying Frontkeep](docs/docs/deploy.md), [inference backends](docs/docs/inference-backends.md), and the [architecture](docs/docs/architecture.md).
 

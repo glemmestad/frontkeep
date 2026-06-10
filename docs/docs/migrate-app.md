@@ -153,7 +153,7 @@ request_resource auth0-application { "name": "api", "app_type": "non_interactive
 >   `AUTH0_AUDIENCE`.
 >
 > An operator that wants these on *every* app sets them as `config.defaults` in
-> an `ASGARD_SERVICES_DIR` overlay (env-sourced via `${VAR}` / `${VAR:csv}`)
+> an `FRONTKEEP_SERVICES_DIR` overlay (env-sourced via `${VAR}` / `${VAR:csv}`)
 > rather than per request — the tenant-specific values stay in the deployment's
 > config, never in the catalog.
 

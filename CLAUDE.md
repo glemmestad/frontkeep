@@ -34,15 +34,15 @@ bash scripts/cleanroom-check.sh            # MUST pass before every commit
 
 Local Postgres for e2e:
 ```bash
-docker run -d --name asgard-ci-pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=asgard -p 5433:5432 postgres:16
+docker run -d --name asgard-ci-pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=frontkeep -p 5433:5432 postgres:16
 # reset between runs:
-docker exec asgard-ci-pg psql -U postgres -c "DROP DATABASE IF EXISTS asgard WITH (FORCE);" -c "CREATE DATABASE asgard;"
+docker exec asgard-ci-pg psql -U postgres -c "DROP DATABASE IF EXISTS frontkeep WITH (FORCE);" -c "CREATE DATABASE asgard;"
 ```
 
 Run it locally and browse the UI (no login on loopback):
 ```bash
-ASGARD_DEV_INSECURE=1 ASGARD_DATABASE_URL="sqlite:///tmp/asgard.db" \
-  ./target/debug/asgard serve --bind 127.0.0.1:8080    # http://localhost:8080
+FRONTKEEP_DEV_INSECURE=1 FRONTKEEP_DATABASE_URL="sqlite:///tmp/asgard.db" \
+  ./target/debug/frontkeep serve --bind 127.0.0.1:8080    # http://localhost:8080
 ```
 
 ## Crate map (`crates/`)
@@ -70,7 +70,7 @@ ASGARD_DEV_INSECURE=1 ASGARD_DATABASE_URL="sqlite:///tmp/asgard.db" \
   evidence record) + `webhook` (external) + **`code-review`** (async — reads the
   repo over the GH/GL API via `repo.rs`, *no clone*, judges it against the
   standards store per tier, `run_tool_loop`). The whole panel is **off unless a
-  real LLM is reachable** (`ASGARD_REVIEW_ALLOW_MOCK=1` forces a deterministic mock
+  real LLM is reachable** (`FRONTKEEP_REVIEW_ALLOW_MOCK=1` forces a deterministic mock
   for dev/e2e). See `docs/docs/review-gate.md`.
 - **provision** — manifest service catalog (`manifest.rs`) + connectors
   (`connectors/terraform.rs` is the universal path) + cost rollup/dashboard
@@ -80,7 +80,7 @@ ASGARD_DEV_INSECURE=1 ASGARD_DATABASE_URL="sqlite:///tmp/asgard.db" \
 - **workflow**, **eval**, **runtime** — request→approve→fulfill; eval gate;
   Runtime trait (gVisor/container/local).
 - **api** — axum 0.8 + async-graphql. `require_session` gates the human surface;
-  `ASGARD_DEV_INSECURE=1` (loopback only) bypasses it and makes `/api/auth/me`
+  `FRONTKEEP_DEV_INSECURE=1` (loopback only) bypasses it and makes `/api/auth/me`
   return a synthetic admin so the UI needs no login.
 - **mcp** — stdio + remote (`/mcp`, rmcp) JSON-RPC tools, the **control plane**.
   Bearer-gated by either a **user PAT** (`asg_pat_…` → acts across every project

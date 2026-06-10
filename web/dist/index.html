@@ -596,16 +596,16 @@
       const base = location.origin + '/mcp';
       const minted = !!token;
       const pat = token || 'asg_pat_your_user_token';
-      const exportLine = `export ASGARD_PAT=${pat}`;
-      // Claude Code bakes the header at add-time — the shell expands $ASGARD_PAT
+      const exportLine = `export FRONTKEEP_PAT=${pat}`;
+      // Claude Code bakes the header at add-time — the shell expands $FRONTKEEP_PAT
       // right then, so an unset var silently stores an empty bearer and every call
       // 401s. The expanded value lands in ~/.claude.json regardless, so the env-var
       // indirection bought no secrecy here, only that footgun. Inline the token.
       const claude = `claude mcp add --transport http frontkeep ${base} \\\n  --header "Authorization: Bearer ${pat}"`;
       // Codex resolves bearer_token_env_var at call time, so the token stays out of
       // config.toml — keep the env-var form, but it must be set in Codex's environment.
-      const codex = `[mcp_servers.frontkeep]\nurl = "${base}"\nbearer_token_env_var = "ASGARD_PAT"`;
-      const cursor = JSON.stringify({ mcpServers: { frontkeep: { url: base, headers: { Authorization: 'Bearer ${ASGARD_PAT}' } } } }, null, 2);
+      const codex = `[mcp_servers.frontkeep]\nurl = "${base}"\nbearer_token_env_var = "FRONTKEEP_PAT"`;
+      const cursor = JSON.stringify({ mcpServers: { frontkeep: { url: base, headers: { Authorization: 'Bearer ${FRONTKEEP_PAT}' } } } }, null, 2);
       const tokenBlock = minted
         ? `<div class="card" style="border-color:var(--teal);margin:10px 0 0">
             <p style="margin:0 0 6px;font-weight:700;color:var(--teal2)">✓ PAT created — shown once, copy it now</p>
@@ -624,9 +624,9 @@
         <h3>Connect your agent over MCP</h3>
         <p class="muted" style="margin:0 0 6px;font-size:13px">Add ${SYS_NAME}'s MCP server to your agent.</p>
         <div class="muted" style="font-size:12px;margin-top:8px">Claude Code</div>${snip(claude)}
-        <p class="muted" style="margin:4px 0 0;font-size:11px">Prefer to keep the token out of <code>~/.claude.json</code>? Export it (above) and use <code>$ASGARD_PAT</code> in the header instead — but make sure it's set in the shell you run this command in.</p>
+        <p class="muted" style="margin:4px 0 0;font-size:11px">Prefer to keep the token out of <code>~/.claude.json</code>? Export it (above) and use <code>$FRONTKEEP_PAT</code> in the header instead — but make sure it's set in the shell you run this command in.</p>
         <div class="muted" style="font-size:12px;margin-top:10px">Codex (<code>~/.codex/config.toml</code>)</div>${snip(codex)}
-        <p class="muted" style="margin:4px 0 0;font-size:11px">Codex reads <code>ASGARD_PAT</code> from its environment at call time — it must be set wherever Codex runs, not just the shell where you edited the config.</p>
+        <p class="muted" style="margin:4px 0 0;font-size:11px">Codex reads <code>FRONTKEEP_PAT</code> from its environment at call time — it must be set wherever Codex runs, not just the shell where you edited the config.</p>
         <div class="muted" style="font-size:12px;margin-top:10px">Cursor / generic Streamable-HTTP client (mcp.json)</div>${snip(cursor)}
         <p class="muted" style="margin:10px 0 0;font-size:12px">Once connected, <code>tools/list</code> shows <code>register_project</code>, <code>request_resource</code>, <code>seed_plan</code>, and the rest. Tell your agent: <em>"read the ${SYS_NAME} standards, register this project, then build."</em></p>
         <p class="muted" style="font-size:11px;margin-top:8px">Deploying an app or CI that lives in a single project? Register one below and mint a <strong>per-project key</strong> there instead — it's scoped to that one project.</p>
@@ -1317,13 +1317,13 @@
           let ex;
           try { ex = await api(`/api/skills/${encodeURIComponent(id)}/export?runtime=${encodeURIComponent(d.runtime)}`); }
           catch (e) { box.innerHTML = errBanner(e); return; }
-          const one = `curl -fsSL -H "Authorization: Bearer $ASGARD_PAT" "${location.origin}/api/skills/${id}/install.sh?dest=${target}" | sh`;
+          const one = `curl -fsSL -H "Authorization: Bearer $FRONTKEEP_PAT" "${location.origin}/api/skills/${id}/install.sh?dest=${target}" | sh`;
           const loss = (ex.loss || []).length
             ? `<details style="margin-top:10px" open><summary class="muted" style="cursor:pointer;font-size:12px">Translation changes (${ex.loss.length}) — ${esc(s.runtime)} → ${esc(d.runtime)}</summary>
                 <ul style="font-size:12px;margin:6px 0">${ex.loss.map(l => `<li><strong>${esc(l.field)}</strong>: ${esc(l.action)} <span class="muted">(${esc(l.reason)})</span></li>`).join('')}</ul></details>`
             : (d.runtime !== s.runtime ? '<div class="muted" style="font-size:12px;margin-top:8px">No changes needed — fully portable.</div>' : '');
           const skillMd = (ex.files.find(f => f.path === 'SKILL.md') || {}).content_b64;
-          box.innerHTML = `<p class="muted" style="font-size:12px">Installs into <code>${esc(d.dir)}/${esc(slug)}/</code>. Set <code>$ASGARD_PAT</code> first (see Getting started), then run:</p>
+          box.innerHTML = `<p class="muted" style="font-size:12px">Installs into <code>${esc(d.dir)}/${esc(slug)}/</code>. Set <code>$FRONTKEEP_PAT</code> first (see Getting started), then run:</p>
             ${snip(one)}
             <details id="sk-preview" style="margin-top:8px"><summary class="muted" style="cursor:pointer;font-size:12px">Preview the install script</summary><div id="sk-script" style="margin-top:6px">${loading('Loading…')}</div></details>
             ${loss}

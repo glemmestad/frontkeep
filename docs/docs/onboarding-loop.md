@@ -31,7 +31,7 @@ control plane. Mint the key, then POST to `/api/gateway/chat` with it (see
 A project must be **registered and active** before Frontkeep will mint a gateway key or provision a resource. Registration records the owner, manager, group/cost-center, classification and budget, and mints a stable `proj-YYYY-NNNN` id.
 
 ```bash
-asgard project register \
+frontkeep project register \
   --name "Fraud Detection" \
   --owner alice@corp.example --manager bob@corp.example \
   --group platform --classification poc --budget-usd 100
@@ -56,7 +56,7 @@ groups:
 Every gateway call is attributed to its project, and the owner / manager / group / cost-center / classification are denormalized onto each usage event at write time — so cost rolls up by any of them with a single query, and historical spend stays attributed to who owned the project when the cost was incurred.
 
 ```bash
-asgard cost report --by group        # or: project | owner | manager | classification | model | provider
+frontkeep cost report --by group        # or: project | owner | manager | classification | model | provider
 # REST:  GET /api/cost?by=group
 # MCP:   cost_report { "by": "group" }
 ```

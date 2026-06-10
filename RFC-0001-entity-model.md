@@ -110,4 +110,4 @@ Reconciliation is idempotent and source-scoped: re-running with no changes is a 
 
 ## 9. Validation
 
-Each kind has a JSON Schema in `schemas/<kind>.schema.json`. Manifests are validated at ingestion and by `asgard validate` / `asgard agent new`. Schemas are the readable contract operators inspect before deploying (brief §3.5). Validation failures are surfaced as PR comments by the Git integration and never silently dropped.
+Each kind has a JSON Schema in `schemas/<kind>.schema.json`. Manifests are validated at ingestion and by `frontkeep validate` / `frontkeep agent new`. Schemas are the readable contract operators inspect before deploying (brief §3.5). Validation failures are surfaced as PR comments by the Git integration and never silently dropped.

@@ -10,7 +10,7 @@ owns the entity model and is depended on by the service crates; surfaces (`api`,
 `cli`, `mcp`) sit on top, wired together by the `asgard` binary.
 
 ```
-asgard (binary: serve / mcp / cli)
+frontkeep (binary: serve / mcp / cli)
   └─ api (REST + GraphQL, axum + async-graphql)
        ├─ catalog   (entities, JSON-Schema validation, Git ingestion, reconcile)
        ├─ gateway   (provider routing, virtual keys, budgets, guardrails, audit)
