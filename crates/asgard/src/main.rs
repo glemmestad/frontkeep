@@ -303,6 +303,11 @@ enum ProjectCmd {
         #[arg(long)]
         budget_usd: Option<f64>,
     },
+    /// Show what registration/promotion requires per classification tier.
+    Requirements {
+        #[arg(long)]
+        classification: Option<String>,
+    },
     /// Show a project's registration record.
     Get { project_id: String },
     /// Show a project's runtime state (budget, spend, kill switch).
@@ -1120,6 +1125,11 @@ async fn main() -> anyhow::Result<()> {
                     opt(&mut m, "description", description);
                     opt(&mut m, "budget_usd", budget_usd);
                     run_tool(&r, "update_project", m, Shape::Auto).await;
+                }
+                ProjectCmd::Requirements { classification } => {
+                    let mut m = Map::new();
+                    opt(&mut m, "classification", classification);
+                    run_tool(&r, "registration_requirements", m, Shape::Auto).await;
                 }
                 ProjectCmd::Get { project_id } => {
                     run_tool(

@@ -33,6 +33,7 @@ These are the tools the MCP server exposes. Use them instead of inventing your o
 | `get_standards` | Fetch the full text of a standard set. | Right after `list_standards`. |
 | `bootstrap` | Return the seed plan for this repo with every file's body inlined — the one-shot repo setup. | When setting a repo up, instead of the `seed_plan`/`seed_get` loop. |
 | `seed_plan` / `seed_get` | Plan the minimal seed set (core + language add-ons + domain overlays + templates), then fetch each file's body. | The fine-grained alternative to `bootstrap`. |
+| `registration_requirements` | What registering/promoting requires per classification tier: evidence fields, budget ceilings, registration policy. | Once, before `register_project`. |
 | `register_project` | Register a project; mints a stable `proj-YYYY-NNNN` id with an owner and data classification. | Before requesting any chargeable resource. **Mandatory gate.** |
 | `list_services` / `get_service` | Discover the catalog of provisionable services (storage, databases, compute, secrets, LLM access, …) and read one manifest. | Before requesting a resource — to see what exists and what it needs. |
 | `request_resource` | Request a service from the catalog for your project. Cheap, reversible types auto-approve; risky ones route to a human. | When your task needs infrastructure. |

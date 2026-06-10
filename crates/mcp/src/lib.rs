@@ -438,6 +438,12 @@ pub struct SecretArgs {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct RegistrationRequirementsArgs {
+    /// Optional: one classification tier (e.g. "light-operational"). Omit for all tiers.
+    pub classification: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct SeedPlanArgs {
     /// Languages the repo is written in (e.g. ["rust", "typescript"]).
     pub languages: Option<Vec<String>>,
@@ -760,6 +766,50 @@ impl AsgardMcp {
             .map(|e| json!({"key": e.key, "display_name": e.display_name, "cost_center": e.cost_center}))
             .collect();
         Ok(json!({"open": self.registry.allowlist().is_open(), "groups": groups}).to_string())
+    }
+
+    fn do_registration_requirements(
+        &self,
+        a: RegistrationRequirementsArgs,
+    ) -> Result<String, String> {
+        use asgard_registry::{CLASSIFICATIONS, DATA_CLASSES};
+        let tiers: Vec<&str> = match a.classification.as_deref() {
+            Some(c) => match CLASSIFICATIONS.iter().find(|t| **t == c) {
+                Some(t) => vec![*t],
+                None => {
+                    return Err(format!(
+                        "unknown classification '{c}'; one of: {}",
+                        CLASSIFICATIONS.join(", ")
+                    ))
+                }
+            },
+            None => CLASSIFICATIONS.to_vec(),
+        };
+        let reqs = self.registry.requirements();
+        let policy = self.registry.policy();
+        let classifications: Vec<_> = tiers
+            .iter()
+            .map(|c| {
+                let ceiling = self.provision.auto_approve_ceiling(c);
+                json!({
+                    "classification": c,
+                    "required_evidence": reqs.required_through(c),
+                    "auto_approve_ceiling_usd": ceiling,
+                    "default_budget_usd": ceiling.map(|x| x / 2.0),
+                })
+            })
+            .collect();
+        Ok(json!({
+            "classifications": classifications,
+            "registration": {
+                "require_manager": policy.require_manager,
+                "require_group": policy.require_group,
+                "groups": "call list_groups for the allowed groups / cost-centers",
+            },
+            "data_classes": DATA_CLASSES,
+            "budget_rule": "an omitted budget defaults to half the tier's ceiling; a budget change above the ceiling routes to human review",
+        })
+        .to_string())
     }
 
     async fn do_list_standards(&self) -> Result<String, String> {
@@ -1679,7 +1729,7 @@ impl AsgardMcp {
     }
 
     #[tool(
-        description = "Register a project (the mandatory gate). Mints a stable proj-YYYY-NNNN id. On a user-token connection you are the owner by default; to stand a project up for someone else, pass their owner_email — you are then recorded as the project's manager (so you keep authority), unless you are an admin, in which case you may hand off owner and manager outright. manager_email and group are optional per the operator's policy (see list_groups); a blank manager defaults to the owner."
+        description = "Register a project (the mandatory gate). Mints a stable proj-YYYY-NNNN id. On a user-token connection you are the owner by default; to stand a project up for someone else, pass their owner_email — you are then recorded as the project's manager (so you keep authority), unless you are an admin, in which case you may hand off owner and manager outright. manager_email and group are optional per the operator's policy (see list_groups); a blank manager defaults to the owner. Call registration_requirements first for the evidence fields and budget ceilings per classification tier."
     )]
     async fn register_project(
         &self,
@@ -1783,6 +1833,16 @@ impl AsgardMcp {
     )]
     async fn list_groups(&self) -> Result<CallToolResult, McpError> {
         wrap(self.do_list_groups())
+    }
+
+    #[tool(
+        description = "What registering (or promoting) a project requires, before you try: per classification tier the required evidence fields, the self-service budget ceiling, and the default budget; plus the registration policy (manager/group required?) and the valid data classes. Static operator config — call it once up front."
+    )]
+    async fn registration_requirements(
+        &self,
+        Parameters(a): Parameters<RegistrationRequirementsArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        wrap(self.do_registration_requirements(a))
     }
 
     #[tool(description = "List the enterprise standard sets an agent's output must conform to.")]
@@ -2271,7 +2331,7 @@ impl AsgardMcp {
     }
 
     #[tool(
-        description = "Request a one-step classification promotion (e.g. poc → light-operational). A clean Light target auto-approves. When a deep code-review reviewer is enabled it reads your repository in the background, so the request may come back as 'reviewing' — poll with promotion_status (or re-fetch the request) until it resolves. If the review finds fixable problems the request is returned to you as 'flagged' with `review_findings` — fix the evidence/repo and call this again to re-run (it supersedes the prior attempt), or escalate_promotion to forward it to a human. Clean Wide/Critical targets need a human by tier. Returns the workflow request."
+        description = "Request a one-step classification promotion (e.g. poc → light-operational). A clean Light target auto-approves. When a deep code-review reviewer is enabled it reads your repository in the background, so the request may come back as 'reviewing' — poll with promotion_status (or re-fetch the request) until it resolves. If the review finds fixable problems the request is returned to you as 'flagged' with `review_findings` — fix the evidence/repo and call this again to re-run (it supersedes the prior attempt), or escalate_promotion to forward it to a human. Clean Wide/Critical targets need a human by tier. See registration_requirements for the evidence fields each tier demands. Returns the workflow request."
     )]
     async fn request_promotion(
         &self,
@@ -2880,6 +2940,47 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[tokio::test]
+    async fn registration_requirements_exposes_evidence_and_ceilings() {
+        let s = server(None).await;
+        let out = s
+            .do_registration_requirements(RegistrationRequirementsArgs {
+                classification: None,
+            })
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let tiers = v["classifications"].as_array().unwrap();
+        assert_eq!(tiers.len(), 4);
+        assert_eq!(tiers[0]["classification"], "poc");
+        assert!(tiers[0]["required_evidence"].as_array().unwrap().is_empty());
+        assert_eq!(tiers[0]["auto_approve_ceiling_usd"], 500.0);
+        assert_eq!(tiers[0]["default_budget_usd"], 250.0);
+        assert!(tiers[1]["required_evidence"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f == "repo_or_source_url"));
+        assert!(v["registration"]["require_manager"].is_boolean());
+        assert!(v["data_classes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d == "internal"));
+
+        assert!(s
+            .do_registration_requirements(RegistrationRequirementsArgs {
+                classification: Some("bogus".into()),
+            })
+            .is_err());
+        let one = s
+            .do_registration_requirements(RegistrationRequirementsArgs {
+                classification: Some("light-operational".into()),
+            })
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&one).unwrap();
+        assert_eq!(v["classifications"].as_array().unwrap().len(), 1);
     }
 
     #[tokio::test]
