@@ -1,4 +1,4 @@
-# Asgard control plane (this hub)
+# Frontkeep control plane (this hub)
 
 The governance hub exposes itself over MCP. Once connected, an agent can register
 a project (the mandatory gate), discover and provision services, read cost, and

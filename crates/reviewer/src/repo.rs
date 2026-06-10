@@ -33,7 +33,7 @@ enum Backend {
     Local {
         root: PathBuf,
     },
-    /// An in-memory file tree (a skill bundle already stored in Asgard) — reviewed
+    /// An in-memory file tree (a skill bundle already stored in Frontkeep) — reviewed
     /// the same way as a repo, no fetch.
     Bundle {
         files: BTreeMap<String, Vec<u8>>,

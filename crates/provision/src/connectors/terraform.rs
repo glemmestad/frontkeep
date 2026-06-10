@@ -1,13 +1,13 @@
 //! Terraform connector — the universal, unrestricted provisioning path. The
 //! "how" lives in hub-supplied TF modules, so any AWS/GCP/Azure (or other)
-//! resource Terraform can express is reachable with zero Asgard code per
+//! resource Terraform can express is reachable with zero Frontkeep code per
 //! service. The connector materializes a per-resource working dir, writes tfvars
 //! from the request spec, injects the immutable project tags as a `tags`
 //! variable, runs `init`/`apply`, and captures `terraform output -json`.
 //! Sensitive outputs are reported as `sensitive_keys` so the caller routes their
 //! values to the secret store — they never land in the resource record.
 //!
-//! State is snapshotted into Asgard's DB (encrypted) around every apply/destroy
+//! State is snapshotted into Frontkeep's DB (encrypted) around every apply/destroy
 //! via an attached [`TfStateStore`], so it survives an ephemeral `work_root`; the
 //! work dir under `work_root/<project>/<type>/<name>` is just scratch. Without a
 //! store attached (tests) state stays local to the work dir.

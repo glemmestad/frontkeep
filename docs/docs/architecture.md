@@ -42,7 +42,7 @@ user code.
 
 See [RFC-0001]. Typed entity graph, Backstage-shaped where it helps, reconciled
 from Git with pull-based semantics so deletes propagate (avoiding catalog drift).
-Asgard emits `catalog-info.yaml` for Backstage interop (one-way).
+Frontkeep emits `catalog-info.yaml` for Backstage interop (one-way).
 
 [RFC-0001]: https://github.com/asgard/asgard/blob/main/RFC-0001-entity-model.md
 [RFC-0002]: https://github.com/asgard/asgard/blob/main/RFC-0002-policy-and-sandbox.md

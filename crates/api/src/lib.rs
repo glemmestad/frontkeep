@@ -40,7 +40,7 @@ pub struct AppState {
     pub identity: IdentityService,
     pub gql: AsgardSchema,
     /// Display name for this deployment, shown as the wordmark/title in the UI.
-    /// Defaults to `Asgard`; operators rebrand via `ASGARD_SYSTEM_NAME`.
+    /// Defaults to `Frontkeep`; operators rebrand via `ASGARD_SYSTEM_NAME`.
     pub system_name: String,
     /// A platform-owned gateway key the dashboard's cost Q&A uses when the caller
     /// supplies none, so the human-first dashboard works without pasting a key.
@@ -99,7 +99,7 @@ impl AppState {
             provision,
             identity,
             gql,
-            system_name: "Asgard".to_string(),
+            system_name: "Frontkeep".to_string(),
             system_cost_key: None,
             cost_qa_model: "model:default/mock".to_string(),
             oidc: None,
@@ -2043,7 +2043,7 @@ fn render_install_sh(
     let mut s = String::new();
     s.push_str("#!/bin/sh\n");
     s.push_str(&format!(
-        "# Install the '{}' skill from Asgard into a {} skills directory.\n",
+        "# Install the '{}' skill from Frontkeep into a {} skills directory.\n",
         comment_safe(name),
         dest.key
     ));
@@ -2053,7 +2053,7 @@ fn render_install_sh(
     ));
     s.push_str("# Or pass a target directory:  sh install.sh /path/to/dir\n");
     s.push_str("set -eu\n");
-    s.push_str(": \"${ASGARD_PAT:?set ASGARD_PAT to your Asgard user token (asg_pat_...)}\"\n");
+    s.push_str(": \"${ASGARD_PAT:?set ASGARD_PAT to your Frontkeep user token (asg_pat_...)}\"\n");
     s.push_str(&format!("dir=\"${{1:-{default_dir}}}\"\n"));
     s.push_str("mkdir -p \"$dir\"\n");
     for d in &subdirs {
@@ -2072,7 +2072,7 @@ fn render_install_sh(
 }
 
 /// A ready-to-run `sh` installer that fetches each of the skill's files (translated for
-/// `dest`) from Asgard into the right per-runtime directory. Replaces the v1 base64
+/// `dest`) from Frontkeep into the right per-runtime directory. Replaces the v1 base64
 /// snippet — the data is pulled at run time, not embedded.
 async fn skill_install_sh(
     State(st): State<AppState>,
@@ -2735,12 +2735,12 @@ fn client_ip(headers: &HeaderMap) -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
-/// Whether this request arrived over TLS. Adaptive by design: Asgard is an OSS
+/// Whether this request arrived over TLS. Adaptive by design: Frontkeep is an OSS
 /// single-binary core that must run with no ancillary services, so it serves
 /// plain http out of the box. `Secure` cookies are therefore set only when TLS is
 /// actually present (a proxy sets `X-Forwarded-Proto: https`) — otherwise a plain
 /// http first deployment could never establish a session. No TLS terminator is
-/// ever *required* to get Asgard going.
+/// ever *required* to get Frontkeep going.
 fn is_https(headers: &HeaderMap) -> bool {
     headers
         .get("x-forwarded-proto")

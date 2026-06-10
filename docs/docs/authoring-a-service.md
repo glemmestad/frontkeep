@@ -110,13 +110,13 @@ a worked example.
 1. Write `modules/<cloud>/<id>/*.tf` (resolved against the configured modules dir).
 2. The connector writes **every spec field** plus the immutable project `tags` as
    tfvars, runs `terraform apply -auto-approve -no-color`, and persists state
-   **encrypted in Asgard's own DB** (the work dir is just scratch).
+   **encrypted in Frontkeep's own DB** (the work dir is just scratch).
 3. Outputs named in `secret_outputs` route to the secret store; the rest land on
    the resource record.
 
 Non-AWS is the same path — `modules/databricks/*`, `modules/auth0/*` prove the
 connector is provider-agnostic (the Terraform subprocess inherits provider creds
-from Asgard's environment).
+from Frontkeep's environment).
 
 Other connectors: `exec` (run a command, parse JSON stdout), `http`/`mcp`, and
 `stub` (the dry-run fallback used when a declared connector isn't registered, so

@@ -3,9 +3,9 @@ sidebar_position: 6
 title: Deploy (operator guide)
 ---
 
-# Deploying Asgard
+# Deploying Frontkeep
 
-Asgard ships as **one statically-linked binary** that serves everything on a
+Frontkeep ships as **one statically-linked binary** that serves everything on a
 single port: the web dashboard (`/`), the REST API (`/api/*`), GraphQL
 (`/graphql`), and the **remote MCP server** (`/mcp`, Streamable HTTP) that agents
 connect to. There is no separate frontend build, no sidecar, no message broker.
@@ -27,12 +27,12 @@ will hit edges in your environment, find where it stops, then iterate.**
 
 ## The auth ladder
 
-Asgard is **secure by default and never ships wide-open**, but it does not force
+Frontkeep is **secure by default and never ships wide-open**, but it does not force
 an identity provider on you. Three rungs:
 
 | Rung | What | When |
 |---|---|---|
-| **1 — local users** | Built-in username/password accounts + sessions. On first boot, if no admin exists and `ASGARD_ADMIN_PASSWORD` is unset, Asgard **generates an admin password and logs it once**. | Default. Zero external dependencies. |
+| **1 — local users** | Built-in username/password accounts + sessions. On first boot, if no admin exists and `ASGARD_ADMIN_PASSWORD` is unset, Frontkeep **generates an admin password and logs it once**. | Default. Zero external dependencies. |
 | **2 — OIDC / SSO** | Authorization-code login against your IdP (Auth0, Okta, Entra, …). Coexists with local users by default (local admin = break-glass); roles can be driven from the IdP and local login can be turned off entirely (see [SSO-driven roles](#sso-driven-roles)). | Enterprise. Set the `ASGARD_OIDC_*` env. |
 | **3 — dev escape hatch** | `ASGARD_DEV_INSECURE=1` disables human-session enforcement. **Off by default, only honored on a loopback bind, logs a loud warning.** | Throwaway local hacking only. Never in a deployment. |
 
@@ -89,7 +89,7 @@ Tags, set by the release pipeline (`.github/workflows/release.yml`):
 
 The image bundles `terraform` on `PATH` and the provisioning modules at `/modules`,
 so an armed deployment needs no extra mounts. (Running your own fork/registry?
-Substitute your image path — nothing in Asgard hard-codes `ghcr.io/glemmestad`.)
+Substitute your image path — nothing in Frontkeep hard-codes `ghcr.io/glemmestad`.)
 
 ### Native binary
 
@@ -114,20 +114,20 @@ dependencies.
 
 ## Optional: TLS via a reverse proxy
 
-**You do not need a proxy to run Asgard.** Over plain http it serves the dashboard,
+**You do not need a proxy to run Frontkeep.** Over plain http it serves the dashboard,
 API, and MCP, and sign-in works (the session cookie is only marked `Secure` when a
 request actually arrives over TLS, so plain http isn't broken by it). For a pilot
 you'll still want TLS — the simplest way is to put any reverse proxy in front and
-let it terminate TLS. If you do, set two headers so Asgard adapts correctly:
+let it terminate TLS. If you do, set two headers so Frontkeep adapts correctly:
 
-- **`X-Forwarded-Proto: https`** — tells Asgard the edge is TLS, so it marks the
+- **`X-Forwarded-Proto: https`** — tells Frontkeep the edge is TLS, so it marks the
   session cookie `Secure`. (Absent → plain http assumed → cookie not `Secure`, and
   login still works.)
 - **`X-Forwarded-For`** — login brute-force throttling keys on the client IP from
   this header. Without it, all sources share one throttle bucket (still safe, just
   coarser).
 
-Route `/`, `/api/*`, `/graphql`, and `/mcp` to the Asgard upstream. No WebSocket
+Route `/`, `/api/*`, `/graphql`, and `/mcp` to the Frontkeep upstream. No WebSocket
 upgrade is needed (MCP uses Streamable HTTP, i.e. plain POST + SSE responses), but
 **don't buffer `/mcp` responses** if you want streaming to flow promptly.
 
@@ -166,7 +166,7 @@ server {
 ## Step 1 — Postgres
 
 SQLite (the default) needs nothing. For a real pilot, run Postgres and point
-Asgard at it.
+Frontkeep at it.
 
 ```bash
 docker run -d --name asgard-pg \
@@ -175,7 +175,7 @@ docker run -d --name asgard-pg \
   postgres:16-alpine
 ```
 
-Or with compose, alongside Asgard:
+Or with compose, alongside Frontkeep:
 
 ```yaml
 # docker-compose.yml
@@ -201,7 +201,7 @@ services:
 volumes: { asgard-pg: {} }
 ```
 
-Asgard runs its own migrations on boot against whatever `ASGARD_DATABASE_URL`
+Frontkeep runs its own migrations on boot against whatever `ASGARD_DATABASE_URL`
 points to; the same schema works on SQLite and Postgres.
 
 > **On ephemeral or replaceable compute, use Postgres — not SQLite.** SQLite is a
@@ -344,7 +344,7 @@ standards without a human curating the file list.
 
 ## Enterprise: OIDC / SSO (rung 2)
 
-Asgard uses the OIDC **authorization-code flow** and reads the user's profile from
+Frontkeep uses the OIDC **authorization-code flow** and reads the user's profile from
 the IdP's `/userinfo` endpoint (no local JWT/JWKS validation — lower operational
 risk). Configure it with env vars; when `ASGARD_OIDC_DOMAIN` is set, the
 `Sign in with SSO` button appears on the login screen and `/api/auth/oidc/*`
@@ -360,10 +360,10 @@ ASGARD_OIDC_REDIRECT_URI=https://<host>/api/auth/oidc/callback
 
 > **`ASGARD_OIDC_*` and `AUTH0_*` are two unrelated credential sets — don't
 > conflate them.** `ASGARD_OIDC_*` is **human login** (the authorization-code flow
-> against any OIDC IdP — Auth0, Okta, Entra) and is read by Asgard itself.
+> against any OIDC IdP — Auth0, Okta, Entra) and is read by Frontkeep itself.
 > `AUTH0_*` is **provisioning** (M2M Management-API creds passed through to the
 > Terraform Auth0 provider, see "Arming provisioning" below) and is read by the
-> `terraform` child process, not Asgard. They happen to overlap only when your IdP
+> `terraform` child process, not Frontkeep. They happen to overlap only when your IdP
 > *is* Auth0 — and even then they are **two separate Auth0 apps** (a Regular Web
 > App for login, an M2M app for provisioning). Setting one does nothing for the
 > other.
@@ -421,7 +421,7 @@ exports.onExecutePostLogin = async (event, api) => {
 ```
 
 Set `ASGARD_OIDC_GROUPS_CLAIM=https://<host>/groups` to match. The value must be in
-`/userinfo` (Asgard reads profile from there, not the ID token).
+`/userinfo` (Frontkeep reads profile from there, not the ID token).
 
 ### SSO-only: disabling local login
 
@@ -446,7 +446,7 @@ Out of the box, provisioning is **unarmed** (the catalog is discoverable and the
 dry-run path works, but nothing real is created). There are two ways to arm it —
 pick one:
 
-**Env-only (container-first, no config file).** Set these on the Asgard process and
+**Env-only (container-first, no config file).** Set these on the Frontkeep process and
 the `terraform` connector registers on boot:
 
 ```bash
@@ -468,14 +468,14 @@ AUTH0_DEFAULT_CONNECTIONS=my-sso-connection          # existing tenant connectio
 `ASGARD_TF_MODULES_DIR` is the switch that arms real provisioning — set it and the
 `terraform` connector registers; omit it and every terraform-backed service silently
 falls back to the dry-run **stub** (a "fulfilled" request that built nothing). The
-provider credentials Terraform uses are inherited from Asgard's own environment (the
+provider credentials Terraform uses are inherited from Frontkeep's own environment (the
 IAM role / instance profile it runs under, plus `AUTH0_*`, etc.).
 
 `ASGARD_TF_ALLOWED` is an **optional** `cloud:account` allowlist — a multi-account
 *hardening* guardrail, not a per-resource list and not required to provision. On a
-single-account deploy the IAM role Asgard runs under is the real boundary; leave this
+single-account deploy the IAM role Frontkeep runs under is the real boundary; leave this
 unset and it provisions into the ambient account. Set it (`aws:<account-id>`,
-`auth0:<tenant>`) only to constrain which accounts Asgard may target when it can
+`auth0:<tenant>`) only to constrain which accounts Frontkeep may target when it can
 assume into several; the first entry is the default target.
 
 This is the recommended path for a container deploy — no `asgard.yaml` needed for
@@ -511,14 +511,14 @@ How the files get to that directory is your call — three patterns, lightest fi
    lives outside the image.
 3. **Object-storage sync** (decoupled, no shared filesystem): an ECS sidecar or
    container entrypoint syncs an S3 prefix into a local dir on start
-   (`aws s3 sync s3://my-bucket/services /srv/services`), then Asgard reads it via
+   (`aws s3 sync s3://my-bucket/services /srv/services`), then Frontkeep reads it via
    `ASGARD_SERVICES_DIR`. Lighter than EFS; adds a startup step.
 
 All three converge on the same contract: **files at a path, two env vars pointed at
-it.** Asgard doesn't care which delivery you choose.
+it.** Frontkeep doesn't care which delivery you choose.
 
 > **Terraform state is durable in the database.** Around every apply/destroy,
-> Asgard snapshots each resource's state into its own DB (the same SQLite or
+> Frontkeep snapshots each resource's state into its own DB (the same SQLite or
 > Postgres as everything else), encrypted with the master key. So `work_dir` is
 > just scratch and may be ephemeral — back up the database and you've backed up
 > your infrastructure state along with everything else. No S3, no remote backend,
@@ -548,7 +548,7 @@ provisioning knobs (auto-approve, services overlay, AWS cost sources) in one pla
 2. **Auth0 provisioning** (the `auth0-application` service) uses the Terraform
    Auth0 provider, which reads **M2M Management API credentials from the
    environment**. The connector spawns `terraform` as a child process that
-   inherits Asgard's environment, so setting these on the Asgard process is
+   inherits Frontkeep's environment, so setting these on the Frontkeep process is
    sufficient:
 
    ```bash
@@ -578,7 +578,7 @@ plaintext, or the audit log.
 | `ASGARD_DATABASE_URL` | `sqlite://…` or `postgres://…`. Migrations run on boot. | `sqlite://asgard.db` |
 | `ASGARD_BIND` | Listen address. | `0.0.0.0:8080` |
 | `ASGARD_SECRET_KEY` | 64 hex chars (32 bytes) for the secret store. From your KMS. **Load-bearing and one-way — changing it orphans every stored secret** (see Step 2). | dev key (insecure) |
-| `ASGARD_SYSTEM_NAME` | Display name the dashboard rebrands to (see "Rebranding" below). | `Asgard` |
+| `ASGARD_SYSTEM_NAME` | Display name the dashboard rebrands to (see "Rebranding" below). | `Frontkeep` |
 | `ASGARD_ADMIN_USER` | Initial admin username. | `admin` |
 | `ASGARD_ADMIN_PASSWORD` | Initial admin password. If unset and no admin exists, one is generated + logged once. | (generated) |
 | `ASGARD_OIDC_DOMAIN` | IdP domain; presence enables SSO. Endpoints derived as `/authorize`, `/oauth/token`, `/userinfo`. | (off) |
@@ -594,9 +594,9 @@ plaintext, or the audit log.
 | `ASGARD_TF_MODULES_DIR` | Arms the `terraform` connector **without a config file** — point it at the bundled modules (`/modules`). Presence is what registers the connector. | (off) |
 | `ASGARD_SERVICES_DIR` | Operator overlay dir of your own `service.yaml` files (added/overridden by `id` on top of the embedded catalog). Lets a deployed image add services without a recompile or an `asgard.yaml`; arms the overlay even without Terraform. See *Bring your own services*. | (off) |
 | `ASGARD_TF_WORK_DIR` | Scratch dir for Terraform working dirs. **State itself is kept (encrypted) in the DB**, so this may be ephemeral. | system temp |
-| `ASGARD_TF_ALLOWED` | **Optional** `cloud:account` allowlist (e.g. `aws:1234567890,auth0:your-tenant`) — a multi-account *hardening* guardrail, not a per-resource list. The real boundary on a single-account deploy is the IAM role Asgard runs under; leave this unset and it provisions into the ambient account. Set it to constrain which cloud accounts Asgard may target when it can assume into several. First entry is the default target. | — |
-| `AWS_DEFAULT_REGION` / `AWS_REGION` | **Standard AWS env**, read by the Terraform AWS provider for *every* AWS module — the one place to set the region all AWS resources deploy into. Asgard adds no region var of its own; a request may still override per-resource via `spec.region`. | (provider default) |
-| `ASGARD_AWS_DEFAULT_ACCOUNT` | AWS-wide default account id for attribution + the request gate's default target. Set it and provisioning into that account works without `ASGARD_TF_ALLOWED` (it's added to the allowlist and made the default target). The account Terraform actually deploys into is still whatever Asgard's IAM creds resolve to. | — |
+| `ASGARD_TF_ALLOWED` | **Optional** `cloud:account` allowlist (e.g. `aws:1234567890,auth0:your-tenant`) — a multi-account *hardening* guardrail, not a per-resource list. The real boundary on a single-account deploy is the IAM role Frontkeep runs under; leave this unset and it provisions into the ambient account. Set it to constrain which cloud accounts Frontkeep may target when it can assume into several. First entry is the default target. | — |
+| `AWS_DEFAULT_REGION` / `AWS_REGION` | **Standard AWS env**, read by the Terraform AWS provider for *every* AWS module — the one place to set the region all AWS resources deploy into. Frontkeep adds no region var of its own; a request may still override per-resource via `spec.region`. | (provider default) |
+| `ASGARD_AWS_DEFAULT_ACCOUNT` | AWS-wide default account id for attribution + the request gate's default target. Set it and provisioning into that account works without `ASGARD_TF_ALLOWED` (it's added to the allowlist and made the default target). The account Terraform actually deploys into is still whatever Frontkeep's IAM creds resolve to. | — |
 | `ASGARD_RDS_SUBNET_GROUP` | RDS-only: the DB subnet group `rds-postgres` deploys into (operator network placement, so agents don't supply it). Unset → the module falls back to the default VPC. | — |
 | `ASGARD_RDS_SECURITY_GROUP_IDS` | RDS-only: comma-separated security group ids for `rds-postgres`. Unset → default VPC security group. | — |
 | `ASGARD_AUTO_APPROVE_CEILINGS` | Per-classification monthly self-service ceilings, `classification=usd` comma list, e.g. `poc=500,light-operational=2500,wide-operational=10000,critical-path=25000`. A request whose project-total infra stays under its tier's ceiling auto-approves; above it routes to human review. Merged per-tier onto the defaults. | poc=500, light-op=2500, wide-op=10000, critical-path=25000 |
@@ -664,7 +664,7 @@ process; there's nothing else to configure.
   IdP must equal `ASGARD_OIDC_REDIRECT_URI` exactly (scheme, host, path). The
   state cookie is short-lived; don't reuse a stale callback URL.
 - **Armed Auth0 provisioning fails with auth errors.** Confirm the `AUTH0_*` M2M
-  variables are set **on the Asgard process** (the Terraform child inherits them)
+  variables are set **on the Frontkeep process** (the Terraform child inherits them)
   and the M2M app is authorized for the Management API scopes the module needs.
 - **`ASGARD_DEV_INSECURE=1` had no effect.** It's only honored on a loopback bind
   (`127.0.0.1`/`localhost`/`::1`); on any other bind it logs a warning and stays

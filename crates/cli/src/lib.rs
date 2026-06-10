@@ -53,7 +53,7 @@ impl CliError {
 /// Write a starter `asgard.yaml` config into `dir`.
 pub fn init_config(dir: &Path) -> Result<PathBuf, CliError> {
     let path = dir.join("asgard.yaml");
-    let body = "# Asgard configuration.\n\
+    let body = "# Frontkeep configuration.\n\
                 database_url: sqlite://asgard.db\n\
                 bind: 0.0.0.0:8080\n\
                 # Catalog source repos to reconcile (needs a Git token in ASGARD_GIT_TOKEN).\n\

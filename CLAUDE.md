@@ -1,9 +1,9 @@
-# CLAUDE.md — Asgard
+# CLAUDE.md — Frontkeep
 
 Orientation for an agent working in this repo. Read this first; it's evergreen
 (architecture + conventions), not session state.
 
-## What Asgard is
+## What Frontkeep is
 
 An open-source, **single static Rust binary** that is a governance control plane
 for AI/agent development: a manifest-driven **service catalog** + model
@@ -101,7 +101,7 @@ ASGARD_DEV_INSECURE=1 ASGARD_DATABASE_URL="sqlite:///tmp/asgard.db" \
   sensitive TF outputs listed in `secret_outputs` route to the secret store.
   Cost-bearing / IAM-shaping services set `auto_approvable: false`. Non-AWS is the
   same path: `modules/databricks/*` + `modules/auth0/*` prove the connector is
-  provider-agnostic (the TF subprocess inherits provider creds from Asgard's env).
+  provider-agnostic (the TF subprocess inherits provider creds from Frontkeep's env).
   Two optional manifest knobs: `long_running: true` (latency hint — returns the
   `provisioning` record immediately, apply runs in the background; never a
   correctness lever) and `retry: {max_attempts, base_secs, cap_secs}` (per-service
@@ -152,9 +152,9 @@ ASGARD_DEV_INSECURE=1 ASGARD_DATABASE_URL="sqlite:///tmp/asgard.db" \
 
 ## Operator/agent docs
 
-`docs/docs/`: `deploy.md` / `deploy-agent.md` (deploy Asgard, incl. self-deploy on
+`docs/docs/`: `deploy.md` / `deploy-agent.md` (deploy Frontkeep, incl. self-deploy on
 ECS), `connect-agent.md` (point an MCP client at `/mcp`), `migrate-app.md`
-(stand a real app on Asgard's primitives), `inference-backends.md`.
+(stand a real app on Frontkeep's primitives), `inference-backends.md`.
 
 ## State / planning
 

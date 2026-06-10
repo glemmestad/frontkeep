@@ -3,9 +3,9 @@ sidebar_position: 6.1
 title: Deploy (agent runbook)
 ---
 
-# Agent runbook: deploy Asgard
+# Agent runbook: deploy Frontkeep
 
-This is a machine-oriented, idempotent runbook for an agent told *"deploy Asgard
+This is a machine-oriented, idempotent runbook for an agent told *"deploy Frontkeep
 in our environment."* Execute the steps in order. After each step, run the
 verification and **do not proceed until it passes**. Conditionals marked
 `[ENTERPRISE]` apply only when single sign-on and/or live provisioning are
@@ -18,12 +18,12 @@ this file is the checklist.
 
 Collect these before starting. Stop and ask a human for any you cannot derive.
 
-- `HOST` — the public hostname Asgard will be reached at (behind your TLS ingress).
+- `HOST` — the public hostname Frontkeep will be reached at (behind your TLS ingress).
 - `ASGARD_SECRET_KEY` — 64 hex chars (32 bytes), from the org KMS. Generate with
   `openssl rand -hex 32` only for a throwaway trial.
 - `DB` — `postgres://USER:PASS@HOST:5432/asgard` for a pilot; `sqlite:///data/asgard.db` for a box trial.
 - `ASGARD_ADMIN_PASSWORD` — optional; if omitted, capture the generated one from the boot log.
-- `ASGARD_SYSTEM_NAME` — optional; UI display name to rebrand the dashboard to (e.g. `Acme Control Plane`). Cosmetic only; defaults to `Asgard`.
+- `ASGARD_SYSTEM_NAME` — optional; UI display name to rebrand the dashboard to (e.g. `Acme Control Plane`). Cosmetic only; defaults to `Frontkeep`.
 - `[ENTERPRISE]` OIDC web-app: `ASGARD_OIDC_DOMAIN`, `ASGARD_OIDC_CLIENT_ID`, `ASGARD_OIDC_CLIENT_SECRET`, and the callback URL `https://HOST/api/auth/oidc/callback` registered in the IdP.
 - `[ENTERPRISE]` Auth0 M2M for provisioning: `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET` (authorized for the Management API).
 
@@ -121,7 +121,7 @@ break-glass.
 
 ## Step 8 — `[ENTERPRISE]` Arm provisioning
 
-Container-first (no config file) — set on the Asgard process (the image bundles
+Container-first (no config file) — set on the Frontkeep process (the image bundles
 `terraform` on `PATH` and the modules at `/modules`):
 ```bash
 ASGARD_TF_MODULES_DIR=/modules
@@ -137,7 +137,7 @@ AUTH0_DOMAIN=... AUTH0_CLIENT_ID=... AUTH0_CLIENT_SECRET=...   # M2M provider cr
 ```
 Region and account are **AWS-wide** (every AWS module uses them); `ASGARD_RDS_*`
 are RDS-only network placement. AWS provider creds come from the IAM role/instance
-profile Asgard runs under. Or via `asgard.yaml` when you want the other
+profile Frontkeep runs under. Or via `asgard.yaml` when you want the other
 provisioning knobs in one place:
 ```yaml
 provisioning:
@@ -145,8 +145,8 @@ provisioning:
   allowed:
     - { cloud: auth0, account: your-tenant }
 ```
-Either way the M2M creds go **on the Asgard process** (the Terraform child inherits
-them). **Terraform state is persisted (encrypted) in Asgard's database** and
+Either way the M2M creds go **on the Frontkeep process** (the Terraform child inherits
+them). **Terraform state is persisted (encrypted) in Frontkeep's database** and
 hydrated back per run, so `ASGARD_TF_WORK_DIR` is just scratch and may be ephemeral
 — back up the DB and you've backed up provisioning state too.
 **Verify:** request `auth0-application` over `/mcp` (`request_resource`) for a
@@ -165,15 +165,15 @@ confirm it never appears in the resource record or audit log).
 - Report back: the host URL, the admin credential location, the onboarded project
   id, and which path (POC vs enterprise) was deployed.
 
-## Appendix — `[DOGFOOD]` Self-deploy Asgard on ECS
+## Appendix — `[DOGFOOD]` Self-deploy Frontkeep on ECS
 
-Asgard provisions itself: a **local** Asgard (Steps 1–8) stands up a **production**
-Asgard on ECS through its own `ecs-service` primitive — the same governed path any
+Frontkeep provisions itself: a **local** Frontkeep (Steps 1–8) stands up a **production**
+Frontkeep on ECS through its own `ecs-service` primitive — the same governed path any
 app uses. This is the smallest possible proof that the control plane can deploy a
 real load-balanced service. Inputs: `VPC_ID`, `SUBNET_IDS` (≥2 AZs), `CERT_ARN`
-(ACM cert for the Asgard hostname), and a Postgres for the production instance.
+(ACM cert for the Frontkeep hostname), and a Postgres for the production instance.
 
-1. **Onboard Asgard as a project** on the local instance and mint a key (Step 5).
+1. **Onboard Frontkeep as a project** on the local instance and mint a key (Step 5).
    Use group `platform`, classification `light-operational`.
 
 2. **Image → ECR.** Request the repo, then build and push by content:
@@ -185,7 +185,7 @@ real load-balanced service. Inputs: `VPC_ID`, `SUBNET_IDS` (≥2 AZs), `CERT_ARN
    aws ecr get-login-password | docker login --username AWS --password-stdin "${ECR_URI%%/*}"
    docker push "$ECR_URI:sha-$(git rev-parse --short HEAD)"   # IMAGE
    ```
-   (The official image already bundles `terraform` + `/modules`, so the ECS Asgard
+   (The official image already bundles `terraform` + `/modules`, so the ECS Frontkeep
    can provision with no mounts.)
 
 3. **Database + secret key.** Provision (or point at) Postgres and create the
@@ -197,7 +197,7 @@ real load-balanced service. Inputs: `VPC_ID`, `SUBNET_IDS` (≥2 AZs), `CERT_ARN
    Record `DB_SECRET_ARN`, `KEY_SECRET_ARN`, and the wrapping `KMS_ARN` (Step 6 of
    the [app migration runbook](./migrate-app.md)).
 
-4. **Deploy the service.** One `ecs-service` request runs Asgard behind HTTPS:
+4. **Deploy the service.** One `ecs-service` request runs Frontkeep behind HTTPS:
    ```json
    request_resource ecs-service {
      "name": "asgard",
@@ -220,9 +220,9 @@ real load-balanced service. Inputs: `VPC_ID`, `SUBNET_IDS` (≥2 AZs), `CERT_ARN
    `ready` over https; the ECS target is `healthy`; the task-role policy contains
    the secrets + KMS grants (`aws iam get-role-policy …`).
 
-5. **Cut over.** Point the Asgard hostname's DNS / ALB alias at `outputs.url`, then
+5. **Cut over.** Point the Frontkeep hostname's DNS / ALB alias at `outputs.url`, then
    migrate any local state (re-register projects, or restore the Postgres dump).
-   Decommission the local instance once the ECS Asgard serves `/readyz`.
+   Decommission the local instance once the ECS Frontkeep serves `/readyz`.
 
-**Dogfood done:** the ECS Asgard answers `/readyz`, lists the catalog over `/mcp`,
-and was provisioned end-to-end by the local Asgard with no console clicks.
+**Dogfood done:** the ECS Frontkeep answers `/readyz`, lists the catalog over `/mcp`,
+and was provisioned end-to-end by the local Frontkeep with no console clicks.

@@ -3,9 +3,9 @@ sidebar_position: 2.1
 title: Install the CLI
 ---
 
-# Install Asgard
+# Install Frontkeep
 
-Asgard is **one statically-linked binary** that is both the server (`asgard
+Frontkeep is **one statically-linked binary** that is both the server (`asgard
 serve`, `asgard mcp`) and the command-line client (`asgard project`, `asgard
 cost`, `asgard chat`, …). Installing it gives you both.
 

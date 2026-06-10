@@ -3,7 +3,7 @@ sidebar_position: 2.3
 title: Use the CLI
 ---
 
-# The Asgard CLI
+# The Frontkeep CLI
 
 The `asgard` binary is both the server and a full command-line client. The CLI is
 a **PAT-authenticated MCP client**: it talks to a deployment's `/mcp` endpoint

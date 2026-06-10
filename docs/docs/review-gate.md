@@ -8,7 +8,7 @@ title: The review gate (machine-judged promotion)
 Promoting a project up the classification ladder (POC → Light → Wide → Critical)
 is gated. The base gate is a **machine evidence check**: are the required fields
 for the target tier present, and did any exception signal fire? On top of that,
-Asgard can run a **reviewer panel** that *judges* the promotion — including a deep
+Frontkeep can run a **reviewer panel** that *judges* the promotion — including a deep
 reviewer that **reads the actual repository** and checks it against your coding
 standards.
 
@@ -27,7 +27,7 @@ of:
 - an enabled **`openai-compatible` gateway module** (LiteLLM, Databricks Model
   Serving, etc. — see [Inference backends](./inference-backends.md)).
 
-The offline **mock model does not count.** With no real model wired, Asgard logs
+The offline **mock model does not count.** With no real model wired, Frontkeep logs
 
 ```
 review gate DISABLED: no LLM access — set an OpenAI/Anthropic key or enable an
@@ -77,9 +77,9 @@ promotion never hangs in `reviewing` — after the retry budget is exhausted it
 
 The reviewer reads code; it **never executes it** (static review only).
 
-### Repository access — the token Asgard holds
+### Repository access — the token Frontkeep holds
 
-The reviewer reads repos with a token Asgard holds in its environment, selected by
+The reviewer reads repos with a token Frontkeep holds in its environment, selected by
 host:
 
 | Host | Token env | Fallback |

@@ -1,4 +1,4 @@
-//! The Asgard binary: one statically-linked entrypoint that wires every layer,
+//! The Frontkeep binary: one statically-linked entrypoint that wires every layer,
 //! serves REST + GraphQL + the embedded web UI, reconciles catalog sources, and
 //! exposes the MCP server and CLI client commands.
 
@@ -73,7 +73,7 @@ struct Cli {
         global = true
     )]
     database_url: String,
-    /// Asgard server origin for CLI commands (talks to `/mcp`). Falls back to the
+    /// Frontkeep server origin for CLI commands (talks to `/mcp`). Falls back to the
     /// selected profile, then `http://localhost:8080`.
     #[arg(long, env = "ASGARD_URL", global = true)]
     url: Option<String>,
@@ -1832,7 +1832,7 @@ async fn cmd_tools(r: &Resolved) {
 
 fn read_pat() -> anyhow::Result<String> {
     use std::io::Write;
-    eprint!("Asgard PAT (asg_pat_…): ");
+    eprint!("Frontkeep PAT (asg_pat_…): ");
     std::io::stderr().flush().ok();
     let mut s = String::new();
     std::io::stdin().read_line(&mut s)?;
@@ -2156,7 +2156,7 @@ async fn serve(database_url: &str, bind: &str, config_path: Option<PathBuf>) -> 
             Arc::new(LlmJudge::new(gateway.clone(), system_cost_key.clone())),
         );
         reviewer_registry.register("webhook", Arc::new(WebhookReviewer::new()));
-        // The deep async reviewer: reads the repo over Asgard's git token and judges
+        // The deep async reviewer: reads the repo over Frontkeep's git token and judges
         // it against the org standards, depth per target tier. Runs in the worker.
         reviewer_registry.register(
             "code-review",
@@ -3268,25 +3268,28 @@ fn serve_doc(name: &str, file: rust_embed::EmbeddedFile, status: StatusCode) -> 
 const DOCS_NOT_BUNDLED: &str = "<!doctype html><meta charset=utf-8><title>Docs not bundled</title>\
 <body style=\"font-family:system-ui;max-width:40rem;margin:4rem auto;padding:0 1rem;line-height:1.5\">\
 <h1>Docs aren't bundled in this build</h1>\
-<p>This Asgard binary was built without the documentation site. Build it with \
+<p>This Frontkeep binary was built without the documentation site. Build it with \
 <code>cd docs &amp;&amp; npm ci &amp;&amp; npm run build</code> before compiling, or read the \
-docs at <a href=\"https://asgard.dev\">asgard.dev</a>.</p>\
-<p><a href=\"/\">← Back to Asgard</a></p>";
+docs at <a href=\"https://frontkeep.dev\">frontkeep.dev</a>.</p>\
+<p><a href=\"/\">← Back to Frontkeep</a></p>";
 
-/// Replace the static `<title>Asgard</title>` shell title with the configured
+/// Replace the static `<title>Frontkeep</title>` shell title with the configured
 /// system name. No-op when unset or still the default, so the stock build is
 /// untouched. Keeps the UI a single embedded file (no build step) while making
 /// the rebrand complete server-side.
 fn brand_index_html(html: &str, system_name: &str) -> String {
     let name = system_name.trim();
-    if name.is_empty() || name == "Asgard" {
+    if name.is_empty() || name == "Frontkeep" {
         return html.to_string();
     }
     let safe = name
         .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;");
-    html.replace("<title>Asgard</title>", &format!("<title>{safe}</title>"))
+    html.replace(
+        "<title>Frontkeep</title>",
+        &format!("<title>{safe}</title>"),
+    )
 }
 
 #[cfg(test)]
@@ -3295,9 +3298,9 @@ mod tests {
 
     #[test]
     fn brand_index_html_rewrites_title_only_when_configured() {
-        let shell = "<html><head><title>Asgard</title></head></html>";
+        let shell = "<html><head><title>Frontkeep</title></head></html>";
         // Default / unset → untouched.
-        assert_eq!(brand_index_html(shell, "Asgard"), shell);
+        assert_eq!(brand_index_html(shell, "Frontkeep"), shell);
         assert_eq!(brand_index_html(shell, ""), shell);
         // Configured name → title rebranded.
         assert!(brand_index_html(shell, "Acme Corp").contains("<title>Acme Corp</title>"));

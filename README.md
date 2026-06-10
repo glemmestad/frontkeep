@@ -1,15 +1,20 @@
-<h1 align="center">Asgard</h1>
+<h1 align="center">Frontkeep</h1>
 
-<p align="center"><b>An open-source control plane for AI &amp; agent development inside a company.</b><br/>
-A single static Rust binary: a manifest-driven service catalog + model gateway + policy + cost attribution + registry + audit — exposed over CLI, MCP, REST + GraphQL, and an embedded UI.</p>
+<p align="center"><b>The Agent Control Plane.</b><br/>
+Where your agents ship at AI speed — with your policies and budgets built in.</p>
+
+<p align="center">Open-source. Single static Rust binary. Agent-native.<br/>
+One front door to every AI model, infrastructure service, and engineering standard your org runs on.</p>
 
 ---
 
 ## Why
 
-Backstage answers *"what exists and who owns it."* For agents that isn't enough. You also need to know **is it safe, is it working, what is it costing, and what did it just do** — and you need every capability reachable by an agent, not just a human clicking a UI.
+Most platforms answer *"what services exist and who owns them."* For an agent that isn't enough — the agent needs to know **is this safe, is it working, what is it costing, and what did it just do.** And the company needs to let agents move fast without going off the rails.
 
-Asgard is **agents-first**. The thing it's built around is a **governed onboarding loop**: point a new effort's AI agent at a seed repo → it reads the company standards → **registers the project (the mandatory gate)** → that unlocks **provisioning of real services through the orchestrator** → and every bit of model and infrastructure spend is **attributed by project / owner / manager / group**. It's a **hub, not a workflow engine**: Asgard serves guidance and data and mints credentials; the agent acts.
+Frontkeep is the front door agents use to do real work in your company. They register projects (the mandatory gate), provision real services through your standards, call models with budgets and policy guardrails attached, and every spend traces back to a project, owner, manager, and group. AI is the loudest tenant — Frontkeep is the building it lives in, alongside infrastructure, data services, and everything else an agent needs.
+
+It's a **hub, not a workflow engine**: Frontkeep serves the standards, mints the credentials, owns the audit log. The agent does the work.
 
 ## What you get
 
@@ -24,7 +29,7 @@ Asgard is **agents-first**. The thing it's built around is a **governed onboardi
 
 ## Design principles
 
-- **One static binary.** Rust, embedded UI. `docker run asgard` and you're productive in an afternoon.
+- **One static binary.** Rust, embedded UI. `docker run` and you're productive in an afternoon.
 - **SQLite by default, Postgres opt-in.** Identical behavior on both — the SQLite path needs zero external services; switch `--database-url` to Postgres to scale out.
 - **Agents first, humans second.** Every capability is an MCP tool, not just a UI/REST route.
 - **Hub, not world-builder.** Serve guidance and data, mint credentials, let the agent act. Resist bespoke orchestration.
@@ -49,7 +54,9 @@ asgard cost report --by group                                        # spend rol
 asgard validate services/s3-bucket/service.yaml                      # offline manifest check
 ```
 
-See [`docs/docs/`](docs/docs/) for [installing the CLI](docs/docs/install.md), [using the CLI](docs/docs/cli.md), the [onboarding loop](docs/docs/onboarding-loop.md), [connecting an agent](docs/docs/connect-agent.md), [deploying Asgard](docs/docs/deploy.md), [inference backends](docs/docs/inference-backends.md), and the [architecture](docs/docs/architecture.md).
+> The CLI binary, env vars (`ASGARD_*`), and the on-disk database file are still named `asgard` while the rebrand to Frontkeep rolls out. The product is Frontkeep; the binary will follow in a later release.
+
+See [`docs/docs/`](docs/docs/) for [installing the CLI](docs/docs/install.md), [using the CLI](docs/docs/cli.md), the [onboarding loop](docs/docs/onboarding-loop.md), [connecting an agent](docs/docs/connect-agent.md), [deploying Frontkeep](docs/docs/deploy.md), [inference backends](docs/docs/inference-backends.md), and the [architecture](docs/docs/architecture.md).
 
 ## Status
 
