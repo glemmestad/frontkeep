@@ -37,14 +37,14 @@ Rules:
 
 ## The gateway and shadow AI
 
-- **Every model call goes through the Asgard gateway** (`gateway_chat`). The gateway enforces budgets, the data-class × model policy, guardrails (secret/PII/prompt-injection detection), the audit trail, and the kill switch. A direct provider call has none of that.
+- **Every model call goes through the Asgard gateway** — mint the project key with `gateway_credential`, call the gateway endpoint (`POST /api/gateway/chat`). The gateway enforces budgets, the data-class × model policy, guardrails (secret/PII/prompt-injection detection), the audit trail, and the kill switch. A direct provider call has none of that.
 - **Shadow AI** — proprietary or sensitive data going to an unapproved model — is the exact failure mode Asgard exists to prevent. Do not do it, and do not help a user do it, even when it would be faster.
 - If a model you want isn't allowlisted for your data class, that is a signal to stop and ask, not to find another route.
 
-## Sandboxed execution
+## Execution limits
 
-- Agent invocations run with per-invocation caps (wall-time, step count, budget) enforced by the runtime, not by the agent's own code. Don't write code that assumes it can run unbounded.
-- A repeatedly-failing or runaway invocation will be tripped by the circuit breaker. Handle that as an expected condition.
+- The project's budget and kill switch are enforced at the gateway: a killed or over-budget project has its next model call rejected. Check `project_state` / `cost_report` rather than assuming headroom, and handle rejection as an expected condition.
+- Long or expensive loops need a bound you set yourself (wall-time, iterations, spend). Don't write code that assumes it can run unbounded.
 
 ## What NOT to do
 

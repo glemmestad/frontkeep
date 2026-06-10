@@ -16,11 +16,15 @@ Asgard's headline workflow is a **governed onboarding loop** for AI/agent work, 
 ```text
 list_standards / get_standards   →  the conventions your output must meet
 register_project                 →  the mandatory gate (mints proj-YYYY-NNNN)
-catalog_search / catalog_get     →  discover what already exists
-gateway_credential / gateway_chat→  call models through the governed gateway
+list_services / get_service      →  discover what you can provision
 request_resource                 →  provision infra for your project
+gateway_credential               →  mint the project's LLM key
 cost_report                      →  spend attributed to your project
 ```
+
+Inference itself is deliberately **not** an MCP tool — it's service usage, not
+control plane. Mint the key, then POST to `/api/gateway/chat` with it (see
+[Connect an agent](connect-agent.md)).
 
 ## 2. Registration is the gate
 
@@ -69,5 +73,28 @@ Resources are requested through Asgard so they're owned, governed, and cost-tagg
 Every provisioned resource is stamped with `project=<id>` (and owner/group/cost-center) so its cost flows into the same rollup as model spend.
 
 :::note Provisioning backend
-The shipped backend is a **dry-run stub**: it computes the plan, tags and a cost estimate and returns deterministic outputs without touching any cloud — enough to drive the whole request → approve → fulfill → cost loop. A live cloud backend implements the same `Provisioner` trait and is selected by configuration; turning it on is an explicit operator decision.
+The universal backend is the **Terraform connector**: a service manifest plus a Terraform module, no core code. A service without live credentials falls back to a dry-run stub that computes the plan, tags, and a cost estimate — enough to drive the whole request → approve → fulfill → cost loop without touching a cloud. Arming live provisioning is an explicit operator decision.
 :::
+
+## 5. Adopting an existing system (brownfield)
+
+The same loop works for a system that already exists outside Asgard — nothing
+is re-provisioned, and Asgard never takes over infrastructure it didn't create:
+
+1. **Merge the seed.** Run `bootstrap` against the existing repo. New files are
+   written; an existing `AGENTS.md`/`CLAUDE.md` is merged, not replaced.
+2. **Register provisional.** `register_project` with `provisional: true` (CLI:
+   `--provisional`). The project is **fully live** — gateway keys, resources,
+   cost attribution all work — but its lifecycle is `provisional`, flagging it
+   for governance triage instead of blocking it.
+3. **Link the existing infrastructure.** `link_resource` records each existing
+   stack with its cost source (`aws-cost-explorer`, `databricks-billing`, …)
+   and a monthly estimate. Asgard does not manage it; you tag the real cloud
+   resources `project=<id>` yourself, and the source attributes actual spend by
+   that tag — into the same rollup as everything else.
+4. **Graduate or retire.** The first successful promotion (real evidence,
+   machine-checked) flips the project to `active`; a system not worth keeping
+   is decommissioned through the normal lifecycle.
+
+To *re-provision* an existing app onto Asgard-managed primitives instead, see
+[Migrate an app](migrate-app.md) — a different journey.

@@ -112,6 +112,11 @@ pub struct RegisterProjectArgs {
     pub budget_usd: Option<f64>,
     pub description: Option<String>,
     pub requester: Option<String>,
+    /// Adopt an existing (brownfield) system: registers in the `provisional`
+    /// lifecycle — fully live (keys, resources, cost attribution) but flagged
+    /// for triage until its first promotion flips it to `active`.
+    #[serde(default)]
+    pub provisional: bool,
     #[serde(flatten)]
     pub evidence: asgard_registry::Evidence,
 }
@@ -366,6 +371,22 @@ pub struct RequestResourceArgs {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct LinkResourceArgs {
+    pub project_id: Option<String>,
+    /// Human label for the linked infrastructure (e.g. "legacy RDS + S3").
+    pub name: String,
+    /// The cost source that attributes its spend (e.g. aws-cost-explorer,
+    /// databricks-billing, litellm, flat, none).
+    pub cost_source: String,
+    /// Monthly estimate, reported until/unless the source measures actuals.
+    pub est_monthly_usd: Option<f64>,
+    /// Extra tags to record on the link (informational — the cloud-side
+    /// `project=<id>` tag is what cost sources filter on).
+    pub tags: Option<std::collections::BTreeMap<String, String>>,
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct DeployImageArgs {
     /// Target project (required on a user token; omit on a project key).
     pub project_id: Option<String>,
@@ -435,6 +456,12 @@ pub struct SecretArgs {
     pub project_id: Option<String>,
     pub name: String,
     pub requester: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct RegistrationRequirementsArgs {
+    /// Optional: one classification tier (e.g. "light-operational"). Omit for all tiers.
+    pub classification: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -621,6 +648,7 @@ impl AsgardMcp {
             data_class: a.data_class,
             budget_usd,
             description: a.description,
+            provisional: a.provisional,
             evidence: a.evidence,
         };
         let actor = actor_email
@@ -760,6 +788,50 @@ impl AsgardMcp {
             .map(|e| json!({"key": e.key, "display_name": e.display_name, "cost_center": e.cost_center}))
             .collect();
         Ok(json!({"open": self.registry.allowlist().is_open(), "groups": groups}).to_string())
+    }
+
+    fn do_registration_requirements(
+        &self,
+        a: RegistrationRequirementsArgs,
+    ) -> Result<String, String> {
+        use asgard_registry::{CLASSIFICATIONS, DATA_CLASSES};
+        let tiers: Vec<&str> = match a.classification.as_deref() {
+            Some(c) => match CLASSIFICATIONS.iter().find(|t| **t == c) {
+                Some(t) => vec![*t],
+                None => {
+                    return Err(format!(
+                        "unknown classification '{c}'; one of: {}",
+                        CLASSIFICATIONS.join(", ")
+                    ))
+                }
+            },
+            None => CLASSIFICATIONS.to_vec(),
+        };
+        let reqs = self.registry.requirements();
+        let policy = self.registry.policy();
+        let classifications: Vec<_> = tiers
+            .iter()
+            .map(|c| {
+                let ceiling = self.provision.auto_approve_ceiling(c);
+                json!({
+                    "classification": c,
+                    "required_evidence": reqs.required_through(c),
+                    "auto_approve_ceiling_usd": ceiling,
+                    "default_budget_usd": ceiling.map(|x| x / 2.0),
+                })
+            })
+            .collect();
+        Ok(json!({
+            "classifications": classifications,
+            "registration": {
+                "require_manager": policy.require_manager,
+                "require_group": policy.require_group,
+                "groups": "call list_groups for the allowed groups / cost-centers",
+            },
+            "data_classes": DATA_CLASSES,
+            "budget_rule": "an omitted budget defaults to half the tier's ceiling; a budget change above the ceiling routes to human review",
+        })
+        .to_string())
     }
 
     async fn do_list_standards(&self) -> Result<String, String> {
@@ -1309,6 +1381,40 @@ impl AsgardMcp {
         Ok(serde_json::to_string(&outcome).unwrap_or_default())
     }
 
+    async fn do_link_resource(&self, pid: &str, a: LinkResourceArgs) -> Result<String, String> {
+        let reg = self
+            .registry
+            .require_active(pid)
+            .await
+            .map_err(|e| e.to_string())?;
+        let rec = self
+            .provision
+            .link_resource(
+                &reg,
+                &a.name,
+                &a.cost_source,
+                a.est_monthly_usd.unwrap_or(0.0),
+                a.tags.unwrap_or_default(),
+                a.note.as_deref().unwrap_or(""),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        let feed = if self.provision.cost_source_configured(a.cost_source.trim()) {
+            ""
+        } else {
+            " This source has no live feed in this deployment yet, so the estimate stands in until an operator wires it."
+        };
+        Ok(json!({
+            "resource": rec,
+            "next": format!(
+                "Asgard does not manage this infrastructure. Tag the underlying cloud resources \
+                 `project={pid}` yourself — the cost source attributes spend by that tag. One link \
+                 per cost source per project is enough.{feed} Unlink (record-only) with deprovision_resource."
+            ),
+        })
+        .to_string())
+    }
+
     async fn do_deploy_image(&self, pid: &str, a: DeployImageArgs) -> Result<String, String> {
         let requester = a.requester.as_deref().unwrap_or(DEFAULT_REQUESTER);
         let outcome = self
@@ -1609,7 +1715,7 @@ impl AsgardMcp {
         Ok(json!({
             "tier": tier.as_str(),
             "files": files,
-            "next": "Each entry's `body` is the actual file content. Write it verbatim to its `path` (create directories as needed) — actually create the files, do not summarize or just describe them. Then call register_project.",
+            "next": "Each entry's `body` is the actual file content. Write each NEW file verbatim to its `path` (create directories as needed) — actually create the files, do not summarize or just describe them. If a file already exists (an AGENTS.md or CLAUDE.md in an existing repo), do NOT overwrite it: merge — keep the repo's guidance and add the Asgard sections it lacks (the project id, the MCP tools, the gateway rule). The .agent/ files are additive. Then call register_project.",
         })
         .to_string())
     }
@@ -1679,7 +1785,7 @@ impl AsgardMcp {
     }
 
     #[tool(
-        description = "Register a project (the mandatory gate). Mints a stable proj-YYYY-NNNN id. On a user-token connection you are the owner by default; to stand a project up for someone else, pass their owner_email — you are then recorded as the project's manager (so you keep authority), unless you are an admin, in which case you may hand off owner and manager outright. manager_email and group are optional per the operator's policy (see list_groups); a blank manager defaults to the owner."
+        description = "Register a project (the mandatory gate). Mints a stable proj-YYYY-NNNN id. On a user-token connection you are the owner by default; to stand a project up for someone else, pass their owner_email — you are then recorded as the project's manager (so you keep authority), unless you are an admin, in which case you may hand off owner and manager outright. manager_email and group are optional per the operator's policy (see list_groups); a blank manager defaults to the owner. Call registration_requirements first for the evidence fields and budget ceilings per classification tier."
     )]
     async fn register_project(
         &self,
@@ -1783,6 +1889,16 @@ impl AsgardMcp {
     )]
     async fn list_groups(&self) -> Result<CallToolResult, McpError> {
         wrap(self.do_list_groups())
+    }
+
+    #[tool(
+        description = "What registering (or promoting) a project requires, before you try: per classification tier the required evidence fields, the self-service budget ceiling, and the default budget; plus the registration policy (manager/group required?) and the valid data classes. Static operator config — call it once up front."
+    )]
+    async fn registration_requirements(
+        &self,
+        Parameters(a): Parameters<RegistrationRequirementsArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        wrap(self.do_registration_requirements(a))
     }
 
     #[tool(description = "List the enterprise standard sets an agent's output must conform to.")]
@@ -2087,6 +2203,21 @@ impl AsgardMcp {
     }
 
     #[tool(
+        description = "Link pre-existing (brownfield) infrastructure to a project for cost attribution WITHOUT Asgard managing it: records a `linked` external resource whose declared cost source and monthly estimate flow into the project's cost rollup. Asgard never touches the infrastructure itself — tag the real cloud resources `project=<id>` so the source can attribute actuals. Unlink (record-only) with deprovision_resource. On a user token pass project_id; on a project key omit it."
+    )]
+    async fn link_resource(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(a): Parameters<LinkResourceArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let pid = match self.resolve_project(&ctx, a.project_id.clone()).await {
+            Ok(p) => p,
+            Err(e) => return deny(e),
+        };
+        wrap(self.do_link_resource(&pid, a).await)
+    }
+
+    #[tool(
         description = "Roll a provisioned container service (e.g. an ecs-service) onto a new image. Swaps only the image in the resource's spec — env, secrets, grants, and the listener cert are preserved — and re-applies in place, so ECS registers a new task-definition revision and rolls with circuit-breaker rollback. Use after pushing the new tag to ECR (see ecr-credential). Returns the `provisioning` record; poll get_resource until `provisioned` or `failed`. Re-deploying the same image is a no-op."
     )]
     async fn deploy_image(
@@ -2271,7 +2402,7 @@ impl AsgardMcp {
     }
 
     #[tool(
-        description = "Request a one-step classification promotion (e.g. poc → light-operational). A clean Light target auto-approves. When a deep code-review reviewer is enabled it reads your repository in the background, so the request may come back as 'reviewing' — poll with promotion_status (or re-fetch the request) until it resolves. If the review finds fixable problems the request is returned to you as 'flagged' with `review_findings` — fix the evidence/repo and call this again to re-run (it supersedes the prior attempt), or escalate_promotion to forward it to a human. Clean Wide/Critical targets need a human by tier. Returns the workflow request."
+        description = "Request a one-step classification promotion (e.g. poc → light-operational). A clean Light target auto-approves. When a deep code-review reviewer is enabled it reads your repository in the background, so the request may come back as 'reviewing' — poll with promotion_status (or re-fetch the request) until it resolves. If the review finds fixable problems the request is returned to you as 'flagged' with `review_findings` — fix the evidence/repo and call this again to re-run (it supersedes the prior attempt), or escalate_promotion to forward it to a human. Clean Wide/Critical targets need a human by tier. See registration_requirements for the evidence fields each tier demands. Returns the workflow request."
     )]
     async fn request_promotion(
         &self,
@@ -2505,9 +2636,12 @@ impl AsgardMcp {
             PromptMessageRole::User,
             "Set this repository up on Asgard now. Do it, don't describe it:\n\
              1. Call the `bootstrap` tool.\n\
-             2. For every file it returns, write the `body` verbatim to its `path` \
+             2. For every NEW file it returns, write the `body` verbatim to its `path` \
              (create directories as needed) — actually create the files on disk; do \
-             not paraphrase or just summarize what the seed contains.\n\
+             not paraphrase or just summarize what the seed contains. If a file \
+             already exists (e.g. this repo has an AGENTS.md or CLAUDE.md), merge \
+             instead of overwriting: keep the repo's guidance and add the Asgard \
+             sections it lacks.\n\
              3. Call `register_project` to register this project — ask me for the \
              owner, budget, and data classification if you don't already have them.\n\
              Start with step 1 now.",
@@ -2837,6 +2971,7 @@ mod tests {
                     budget_usd: None,
                     description: None,
                     requester: None,
+                    provisional: false,
                     evidence: Default::default(),
                 },
                 None,
@@ -2877,6 +3012,47 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[tokio::test]
+    async fn registration_requirements_exposes_evidence_and_ceilings() {
+        let s = server(None).await;
+        let out = s
+            .do_registration_requirements(RegistrationRequirementsArgs {
+                classification: None,
+            })
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let tiers = v["classifications"].as_array().unwrap();
+        assert_eq!(tiers.len(), 4);
+        assert_eq!(tiers[0]["classification"], "poc");
+        assert!(tiers[0]["required_evidence"].as_array().unwrap().is_empty());
+        assert_eq!(tiers[0]["auto_approve_ceiling_usd"], 500.0);
+        assert_eq!(tiers[0]["default_budget_usd"], 250.0);
+        assert!(tiers[1]["required_evidence"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f == "repo_or_source_url"));
+        assert!(v["registration"]["require_manager"].is_boolean());
+        assert!(v["data_classes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d == "internal"));
+
+        assert!(s
+            .do_registration_requirements(RegistrationRequirementsArgs {
+                classification: Some("bogus".into()),
+            })
+            .is_err());
+        let one = s
+            .do_registration_requirements(RegistrationRequirementsArgs {
+                classification: Some("light-operational".into()),
+            })
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&one).unwrap();
+        assert_eq!(v["classifications"].as_array().unwrap().len(), 1);
     }
 
     #[tokio::test]

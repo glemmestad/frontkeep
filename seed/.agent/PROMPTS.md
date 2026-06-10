@@ -30,11 +30,12 @@ If the review surfaces a gap, fix it before you say done — don't report it as 
 When the task needs a model, a secret, storage, or an existing tool, don't wire it
 directly — discover and request it through the catalog:
 
-> Search the catalog for an entity that already does this (`catalog_search` by
-> kind + query). If one exists, read its spec (`catalog_get`) and reuse it.
-> If nothing fits, `request_resource` for the project with the narrowest scope
-> the task needs and the correct data classification. If the project isn't
-> registered yet, `register_project` first — it's the gate, not a formality.
+> Check what already exists: `list_services` for provisionable services,
+> `mcp_catalog_list` / `skills_catalog_list` for published tools and skills,
+> `guidance_list` for playbooks. If a service fits, read its manifest
+> (`get_service`) and `request_resource` for the project with the narrowest
+> scope the task needs and the correct data classification. If the project
+> isn't registered yet, `register_project` first — it's the gate, not a formality.
 
 Never broaden a grant to silence a permission error; request the correct narrow grant. If the resource isn't in the catalog and five projects would need it, surface that as a gap.
 

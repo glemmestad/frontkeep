@@ -292,6 +292,15 @@ curl -s -o "$WORK/boot.out" -X POST "$BASE/mcp" -H "authorization: Bearer $KEY" 
   -H 'content-type: application/json' -H "$MCP_ACCEPT" -d "$BOOT"
 grep -q 'AGENTS.md' "$WORK/boot.out" && grep -q 'RUST.md' "$WORK/boot.out" \
   && ok "MCP bootstrap inlines AGENTS.md + standards in one call" || { bad "bootstrap did not return inlined seed files"; cat "$WORK/boot.out"; }
+# The seed must never re-teach a removed surface (gateway_chat left MCP; inference is out-of-band).
+grep -q 'gateway_chat' "$WORK/boot.out" && bad "bootstrap output re-teaches gateway_chat (removed surface)" || ok "bootstrap output is free of removed surfaces"
+# Registration requirements are discoverable up front (evidence fields + ceilings per tier).
+grep -q '"registration_requirements"' "$WORK/tools.out" && ok "MCP exposes registration_requirements" || bad "registration_requirements tool missing from MCP"
+REQS='{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"registration_requirements","arguments":{}}}'
+curl -s -o "$WORK/reqs.out" -X POST "$BASE/mcp" -H "authorization: Bearer $KEY" -H "mcp-session-id: $SID" \
+  -H 'content-type: application/json' -H "$MCP_ACCEPT" -d "$REQS"
+grep -q 'required_evidence' "$WORK/reqs.out" && grep -q 'auto_approve_ceiling_usd' "$WORK/reqs.out" \
+  && ok "registration_requirements returns evidence fields + ceilings" || { bad "registration_requirements did not return requirements"; cat "$WORK/reqs.out"; }
 grep -q '"guidance_put"' "$WORK/tools.out" && ok "MCP exposes guidance tools (guidance_put)" || bad "guidance_put tool missing from MCP"
 grep -q '"recipe_get"' "$WORK/tools.out" && ok "MCP exposes recipe tools (recipe_get)" || bad "recipe_get tool missing from MCP"
 grep -q '"mcp_catalog_list"' "$WORK/tools.out" && grep -q '"mcp_catalog_publish"' "$WORK/tools.out" \
@@ -945,6 +954,19 @@ curl -s -o "$WORK/pxp.out" -X POST "$BASE2/mcp" -H "authorization: Bearer $PAT" 
   -H 'content-type: application/json' -H "$MCP_ACCEPT" -d "$PXP"
 grep -qi 'not authorized' "$WORK/pxp.out" && ok "PAT denied a project the user does not own/manage" || { bad "PAT cross-project was not denied"; cat "$WORK/pxp.out"; }
 
+# 20f-i-b. First-credential bootstrap: `asgard admin bootstrap` mints a PAT
+# DB-direct (no running server needed), is idempotent, and the printed PAT
+# opens /mcp — the zero-to-agent path on a fresh deploy.
+"$BIN" --database-url "sqlite://${WORK}/auth.db" admin bootstrap >"$WORK/abootstrap.out" 2>/dev/null
+grep -q "already exists" "$WORK/abootstrap.out" && ok "admin bootstrap is idempotent against an existing admin" || { bad "admin bootstrap did not detect existing admin"; cat "$WORK/abootstrap.out"; }
+APAT=$(grep 'PAT (shown once):' "$WORK/abootstrap.out" | awk '{print $NF}')
+[[ "$APAT" == asg_pat_* ]] && ok "admin bootstrap prints a PAT (asg_pat_…)" || bad "admin bootstrap printed no PAT (got '${APAT:0:12}')"
+AINIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"e2e-bootstrap","version":"0"}}}'
+curl -s -D "$WORK/amcp.hdr" -o "$WORK/amcp.out" -X POST "$BASE2/mcp" \
+  -H "authorization: Bearer $APAT" -H 'content-type: application/json' -H "$MCP_ACCEPT" -d "$AINIT"
+grep -qi '200 OK' "$WORK/amcp.hdr" && grep -q '"serverInfo"' "$WORK/amcp.out" \
+  && ok "bootstrap-minted PAT opens /mcp (initialize negotiates)" || { bad "bootstrap PAT rejected on /mcp"; cat "$WORK/amcp.hdr" "$WORK/amcp.out"; }
+
 # 20f-ii. On-behalf registration: finn stands up a project for teammate gail. gail
 # becomes the owner; finn is recorded as the manager so he keeps authority over what
 # he just stood up — the provisioning-on-behalf-of a platform team needs.
@@ -953,6 +975,42 @@ curl -s -o "$WORK/pob.out" -X POST "$BASE2/mcp" -H "authorization: Bearer $PAT" 
   -H 'content-type: application/json' -H "$MCP_ACCEPT" -d "$POB"
 grep -q 'gail@corp.example' "$WORK/pob.out" && grep -q 'finn@corp.example' "$WORK/pob.out" \
   && ok "PAT on-behalf register: owner=teammate, manager=caller" || { bad "on-behalf register wrong"; cat "$WORK/pob.out"; }
+
+# 20f-ii-b. Brownfield adoption: a provisional registration is fully live —
+# the gate mints a key for it — and flagged for triage instead of blocked.
+PPROV='{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"register_project","arguments":{"name":"Finn Legacy","group":"platform","classification":"poc","provisional":true}}}'
+curl -s -o "$WORK/pprov.out" -X POST "$BASE2/mcp" -H "authorization: Bearer $PAT" -H "mcp-session-id: $PSID" \
+  -H 'content-type: application/json' -H "$MCP_ACCEPT" -d "$PPROV"
+grep -q 'provisional' "$WORK/pprov.out" && ok "provisional registration records lifecycle=provisional" || { bad "provisional register wrong"; cat "$WORK/pprov.out"; }
+PPROV_PID=$(python3 - "$WORK/pprov.out" <<'PY' 2>/dev/null
+import sys,re
+m=re.search(r'proj-\d{4}-\d{4}', open(sys.argv[1]).read())
+print(m.group(0) if m else '')
+PY
+)
+PCRED="{\"jsonrpc\":\"2.0\",\"id\":13,\"method\":\"tools/call\",\"params\":{\"name\":\"gateway_credential\",\"arguments\":{\"project_id\":\"${PPROV_PID}\"}}}"
+curl -s -o "$WORK/pcred.out" -X POST "$BASE2/mcp" -H "authorization: Bearer $PAT" -H "mcp-session-id: $PSID" \
+  -H 'content-type: application/json' -H "$MCP_ACCEPT" -d "$PCRED"
+grep -q 'asg_' "$WORK/pcred.out" && ok "provisional project mints a gateway key (live, not blocked)" || { bad "provisional project denied a key"; cat "$WORK/pcred.out"; }
+
+# 20f-ii-c. link_resource: pre-existing infra is recorded for cost attribution
+# without Asgard managing it; deprovision merely unlinks the record.
+PLINK="{\"jsonrpc\":\"2.0\",\"id\":14,\"method\":\"tools/call\",\"params\":{\"name\":\"link_resource\",\"arguments\":{\"project_id\":\"${PPROV_PID}\",\"name\":\"legacy-stack\",\"cost_source\":\"flat\",\"est_monthly_usd\":120}}}"
+curl -s -o "$WORK/plink.out" -X POST "$BASE2/mcp" -H "authorization: Bearer $PAT" -H "mcp-session-id: $PSID" \
+  -H 'content-type: application/json' -H "$MCP_ACCEPT" -d "$PLINK"
+grep -q 'linked' "$WORK/plink.out" && grep -q 'does not manage' "$WORK/plink.out" \
+  && ok "link_resource records external infra (state=linked, tag instruction returned)" || { bad "link_resource failed"; cat "$WORK/plink.out"; }
+PLINK_ID=$(python3 - "$WORK/plink.out" <<'PY' 2>/dev/null
+import json,sys,re
+raw=open(sys.argv[1]).read()
+m=re.search(r'\\"id\\":\\"([0-9a-f-]+)\\"', raw) or re.search(r'"id":"([0-9a-f-]+)"', raw)
+print(m.group(1) if m else '')
+PY
+)
+PUNLINK="{\"jsonrpc\":\"2.0\",\"id\":15,\"method\":\"tools/call\",\"params\":{\"name\":\"deprovision_resource\",\"arguments\":{\"resource_id\":\"${PLINK_ID}\"}}}"
+curl -s -o "$WORK/punlink.out" -X POST "$BASE2/mcp" -H "authorization: Bearer $PAT" -H "mcp-session-id: $PSID" \
+  -H 'content-type: application/json' -H "$MCP_ACCEPT" -d "$PUNLINK"
+grep -q 'destroyed' "$WORK/punlink.out" && ok "deprovision unlinks a linked resource (record-only)" || { bad "unlink failed"; cat "$WORK/punlink.out"; }
 
 # 20f-iii. Approvals over MCP. A governed credential (litellm-key, auto_approvable:false)
 # parks for approval; finn — the project's manager — sees it via list_pending_approvals
