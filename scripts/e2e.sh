@@ -945,6 +945,58 @@ curl -s -o "$WORK/pxp.out" -X POST "$BASE2/mcp" -H "authorization: Bearer $PAT" 
   -H 'content-type: application/json' -H "$MCP_ACCEPT" -d "$PXP"
 grep -qi 'not authorized' "$WORK/pxp.out" && ok "PAT denied a project the user does not own/manage" || { bad "PAT cross-project was not denied"; cat "$WORK/pxp.out"; }
 
+# 20f-ii. On-behalf registration: finn stands up a project for teammate gail. gail
+# becomes the owner; finn is recorded as the manager so he keeps authority over what
+# he just stood up — the provisioning-on-behalf-of a platform team needs.
+POB='{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"register_project","arguments":{"name":"Gail Proj","owner_email":"gail@corp.example","group":"platform","classification":"poc"}}}'
+curl -s -o "$WORK/pob.out" -X POST "$BASE2/mcp" -H "authorization: Bearer $PAT" -H "mcp-session-id: $PSID" \
+  -H 'content-type: application/json' -H "$MCP_ACCEPT" -d "$POB"
+grep -q 'gail@corp.example' "$WORK/pob.out" && grep -q 'finn@corp.example' "$WORK/pob.out" \
+  && ok "PAT on-behalf register: owner=teammate, manager=caller" || { bad "on-behalf register wrong"; cat "$WORK/pob.out"; }
+
+# 20f-iii. Approvals over MCP. A governed credential (litellm-key, auto_approvable:false)
+# parks for approval; finn — the project's manager — sees it via list_pending_approvals
+# and clears it with approve_request, so the agent loop never needs the web UI.
+PLLK="{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"tools/call\",\"params\":{\"name\":\"request_resource\",\"arguments\":{\"project_id\":\"${PAGENT_PID}\",\"resource_type\":\"litellm-key\",\"name\":\"default\",\"spec\":{\"max_budget_usd\":25}}}}"
+curl -s -o "$WORK/pllk.out" -X POST "$BASE2/mcp" -H "authorization: Bearer $PAT" -H "mcp-session-id: $PSID" \
+  -H 'content-type: application/json' -H "$MCP_ACCEPT" -d "$PLLK"
+
+PLIST='{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"list_pending_approvals","arguments":{}}}'
+curl -s -o "$WORK/plist.out" -X POST "$BASE2/mcp" -H "authorization: Bearer $PAT" -H "mcp-session-id: $PSID" \
+  -H 'content-type: application/json' -H "$MCP_ACCEPT" -d "$PLIST"
+PREQID=$(python3 - "$WORK/plist.out" "$PAGENT_PID" <<'PY' 2>/dev/null
+import json, sys, re
+raw = open(sys.argv[1]).read(); pid = sys.argv[2]
+def envelopes(raw):
+    raw = raw.strip(); found = False
+    for line in raw.splitlines():
+        line = line.strip()
+        if line.startswith('data:'):
+            found = True
+            try: yield json.loads(line[5:].strip())
+            except Exception: pass
+    if not found:
+        try: yield json.loads(raw)
+        except Exception: pass
+text = None
+for env in envelopes(raw):
+    cont = (env.get('result') or {}).get('content') or []
+    if cont and cont[0].get('text'):
+        text = cont[0]['text']; break
+if not text: sys.exit(1)
+for r in json.loads(text):
+    pl = r.get('payload') or {}
+    if pl.get('project_id') == pid:
+        print(r['id']); break
+PY
+)
+[[ -n "$PREQID" ]] && ok "list_pending_approvals shows the manager their parked request" || { bad "pending request not listed"; cat "$WORK/plist.out"; }
+
+PAPP="{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"tools/call\",\"params\":{\"name\":\"approve_request\",\"arguments\":{\"request_id\":\"${PREQID}\"}}}"
+curl -s -o "$WORK/papp.out" -X POST "$BASE2/mcp" -H "authorization: Bearer $PAT" -H "mcp-session-id: $PSID" \
+  -H 'content-type: application/json' -H "$MCP_ACCEPT" -d "$PAPP"
+grep -qE 'fulfilled|approved' "$WORK/papp.out" && ok "manager approves a parked request over MCP (approve_request)" || { bad "MCP approve failed"; cat "$WORK/papp.out"; }
+
 # 20g. MCP catalog over a user token: finn publishes an MCP server as himself; the
 # entry is owned by his identity (the contact point) and listed user-submitted.
 PCAT='{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"mcp_catalog_publish","arguments":{"name":"Finn Agent MCP","summary":"published over a PAT","install":{"transport":"remote","url":"https://finn-agent/mcp"}}}}'

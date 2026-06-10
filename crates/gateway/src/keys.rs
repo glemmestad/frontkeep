@@ -307,6 +307,27 @@ impl GatewayRepo {
         Ok(())
     }
 
+    /// Re-stamp the denormalized owner/manager on the runtime row. Unlike
+    /// `set_registration` this touches nothing else (no lifecycle/registered reset),
+    /// so an ownership transfer can't accidentally revive a killed project.
+    pub async fn set_ownership(
+        &self,
+        project_id: &str,
+        owner: &str,
+        manager: &str,
+    ) -> Result<(), GatewayError> {
+        sqlx::query(&self.db.q(
+            "UPDATE projects_runtime SET owner = ?, manager = ?, updated_at = ? WHERE project_id = ?",
+        ))
+        .bind(owner)
+        .bind(manager)
+        .bind(asgard_storage::now())
+        .bind(project_id)
+        .execute(self.db.pool())
+        .await?;
+        Ok(())
+    }
+
     pub async fn set_lifecycle(
         &self,
         project_id: &str,

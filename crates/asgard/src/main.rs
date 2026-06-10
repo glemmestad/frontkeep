@@ -600,6 +600,27 @@ enum ResourceCmd {
         #[arg(long)]
         project: Option<String>,
     },
+    /// List requests awaiting approval (over-ceiling cost or a review-gated service)
+    /// for projects you own or manage.
+    Pending {
+        /// Narrow to one project; omit to list every pending request you may see.
+        #[arg(long)]
+        project: Option<String>,
+    },
+    /// Approve a pending request — its project's manager or an admin only.
+    Approve {
+        /// The request id from `resource pending`.
+        request_id: String,
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// Deny a pending request — its project's manager or an admin only.
+    Deny {
+        /// The request id from `resource pending`.
+        request_id: String,
+        #[arg(long)]
+        reason: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1477,6 +1498,23 @@ async fn main() -> anyhow::Result<()> {
                     m.insert("image".into(), json!(image));
                     opt(&mut m, "project_id", project);
                     run_tool(&r, "deploy_image", m, Shape::Auto).await;
+                }
+                ResourceCmd::Pending { project } => {
+                    let mut m = Map::new();
+                    opt(&mut m, "project_id", project);
+                    run_tool(&r, "list_pending_approvals", m, Shape::Auto).await;
+                }
+                ResourceCmd::Approve { request_id, reason } => {
+                    let mut m = Map::new();
+                    m.insert("request_id".into(), json!(request_id));
+                    opt(&mut m, "reason", reason);
+                    run_tool(&r, "approve_request", m, Shape::Auto).await;
+                }
+                ResourceCmd::Deny { request_id, reason } => {
+                    let mut m = Map::new();
+                    m.insert("request_id".into(), json!(request_id));
+                    opt(&mut m, "reason", reason);
+                    run_tool(&r, "deny_request", m, Shape::Auto).await;
                 }
             }
         }

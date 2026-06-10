@@ -129,6 +129,11 @@ pub struct UpdateProjectArgs {
     /// New monthly budget. Up to the classification's self-service ceiling applies
     /// immediately; above it routes to human review.
     pub budget_usd: Option<f64>,
+    /// Transfer the project to a new owner (the owner gains authority + cost scoping).
+    /// Allowed for the current owner/manager or an admin.
+    pub owner_email: Option<String>,
+    /// Reassign the project's manager.
+    pub manager_email: Option<String>,
     #[serde(flatten)]
     pub evidence: asgard_registry::Evidence,
 }
@@ -136,6 +141,21 @@ pub struct UpdateProjectArgs {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct IdArg {
     pub id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ListPendingApprovalsArgs {
+    /// Optional: narrow to one project id. Omit to list every pending request you may see.
+    pub project_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ApprovalDecisionArgs {
+    /// The pending request id (from list_pending_approvals).
+    pub request_id: String,
+    /// Optional note recorded with the decision.
+    #[serde(default)]
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -574,16 +594,16 @@ impl AsgardMcp {
         }
     }
 
-    /// `owner_override` stamps the owner from the authenticated user (a PAT
-    /// caller can only register projects they own) — the onboarding loop: one
-    /// PAT registers a project and is immediately authorized to provision it.
+    /// Register a project. `a.owner_email`/`a.manager_email` are pre-resolved by the
+    /// tool wrapper from the principal (a user registers for themselves by default;
+    /// an on-behalf registration names the owner and keeps the caller as manager).
+    /// `actor_email` is the authenticated caller, recorded for audit.
     async fn do_register_project(
         &self,
         a: RegisterProjectArgs,
-        owner_override: Option<String>,
+        actor_email: Option<String>,
     ) -> Result<String, String> {
         let requester = a.requester.clone();
-        let owner_email = owner_override.clone().unwrap_or(a.owner_email);
         // No budget given → default to half the classification's self-service
         // ceiling, so a project never registers with a $0 (effectively no-cap) budget.
         let budget_usd = a.budget_usd.or_else(|| {
@@ -594,7 +614,7 @@ impl AsgardMcp {
         });
         let input = RegisterInput {
             name: a.name,
-            owner_email,
+            owner_email: a.owner_email,
             manager_email: a.manager_email,
             group: a.group,
             classification: a.classification,
@@ -603,7 +623,7 @@ impl AsgardMcp {
             description: a.description,
             evidence: a.evidence,
         };
-        let actor = owner_override
+        let actor = actor_email
             .as_deref()
             .map(|e| format!("user:{e}"))
             .unwrap_or_else(|| {
@@ -612,10 +632,9 @@ impl AsgardMcp {
                     .unwrap_or("agent:default/unknown")
                     .to_string()
             });
-        let actor = actor.as_str();
         let reg = self
             .registry
-            .register(input, actor)
+            .register(input, &actor)
             .await
             .map_err(|e| e.to_string())?;
         Ok(serde_json::to_string(&reg).unwrap_or_default())
@@ -648,6 +667,8 @@ impl AsgardMcp {
                     name: a.name,
                     description: a.description,
                     budget_usd: a.budget_usd,
+                    owner_email: a.owner_email,
+                    manager_email: a.manager_email,
                 },
                 ceiling,
                 actor,
@@ -1337,6 +1358,114 @@ impl AsgardMcp {
         Ok(serde_json::to_string(&recs).unwrap_or_default())
     }
 
+    /// Pending (state=requested) requests the caller may *see*: scoped to projects they
+    /// own or manage, unless they hold the see-all role. A project key sees only its own.
+    async fn do_list_pending_approvals(
+        &self,
+        auth: Option<McpAuth>,
+        project_id: Option<String>,
+    ) -> Result<String, String> {
+        // A request's project lives in its payload (provision/budget) or a `project:`
+        // subject (promotion) — not in the workflow `subject` column — so scope in code
+        // via WorkflowRequest::project_id rather than a SQL subject filter.
+        let filter = asgard_workflow::RequestFilter {
+            state: Some(asgard_workflow::State::Requested),
+            ..Default::default()
+        };
+        let mut reqs = self
+            .workflow
+            .list(&filter)
+            .await
+            .map_err(|e| e.to_string())?;
+        if let Some(want) = project_id.filter(|s| !s.is_empty()) {
+            reqs.retain(|r| r.project_id() == Some(want.as_str()));
+        }
+        match auth {
+            Some(McpAuth::Project { project_id }) => {
+                reqs.retain(|r| r.project_id() == Some(project_id.as_str()));
+            }
+            Some(McpAuth::User { email, role }) => {
+                let see_all = Role::parse(&role).can(asgard_identity::Capability::ViewAllCost);
+                if !see_all {
+                    let projects = self.registry.list().await.map_err(|e| e.to_string())?;
+                    let mine: std::collections::HashSet<String> = projects
+                        .iter()
+                        .filter(|p| p.owner == email || p.manager == email)
+                        .map(|p| p.project_id.clone())
+                        .collect();
+                    reqs.retain(|r| r.project_id().is_some_and(|p| mine.contains(p)));
+                }
+            }
+            None => {}
+        }
+        Ok(serde_json::to_string(&reqs).unwrap_or_default())
+    }
+
+    /// Approve (`approve=true`) or deny a pending request. The approver must be a user
+    /// principal who is the subject project's manager or holds `ApproveRequests` — never
+    /// the owner alone, never a project key (see `asgard_identity::may_approve_request`).
+    /// On approval of a provisioning request, enqueue the apply (mirrors the REST path).
+    async fn do_decide_request(
+        &self,
+        auth: Option<McpAuth>,
+        id: &str,
+        reason: Option<&str>,
+        approve: bool,
+    ) -> Result<String, String> {
+        let (email, role) = match auth {
+            Some(McpAuth::User { email, role }) => (email, role),
+            _ => {
+                return Err("approving a request requires a user token (asg_pat_…); a project key cannot approve its own requests".into())
+            }
+        };
+        let req = self
+            .workflow
+            .get(id)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("request {id} not found"))?;
+        let manager = match req.project_id() {
+            Some(pid) => self
+                .registry
+                .get(pid)
+                .await
+                .map_err(|e| e.to_string())?
+                .map(|r| r.manager)
+                .unwrap_or_default(),
+            None => String::new(),
+        };
+        if !asgard_identity::may_approve_request(Role::parse(&role), &email, &manager) {
+            return Err(format!(
+                "not authorized to decide request {id} (its project's manager or an approver role only)"
+            ));
+        }
+        let actor = format!("user:{email}");
+        if !approve {
+            let rejected = self
+                .workflow
+                .reject(id, &actor, reason)
+                .await
+                .map_err(|e| e.to_string())?;
+            return Ok(serde_json::to_string(&rejected).unwrap_or_default());
+        }
+        let approved = self
+            .workflow
+            .approve(id, &actor, reason)
+            .await
+            .map_err(|e| e.to_string())?;
+        if approved.kind.starts_with("provision:")
+            && approved.state == asgard_workflow::State::Approved
+        {
+            let outcome = self
+                .provision
+                .fulfill(&self.workflow, &self.registry, id, &actor)
+                .await
+                .map_err(|e| e.to_string())?;
+            return Ok(serde_json::to_string(&outcome.request).unwrap_or_default());
+        }
+        Ok(serde_json::to_string(&approved).unwrap_or_default())
+    }
+
     async fn do_request_promotion(
         &self,
         pid: &str,
@@ -1550,20 +1679,30 @@ impl AsgardMcp {
     }
 
     #[tool(
-        description = "Register a project (the mandatory gate). Mints a stable proj-YYYY-NNNN id. On a user-token connection the owner is stamped from your identity (owner_email is ignored). manager_email and group are required or optional per the operator's policy (see list_groups and registration policy); a blank manager defaults to the owner."
+        description = "Register a project (the mandatory gate). Mints a stable proj-YYYY-NNNN id. On a user-token connection you are the owner by default; to stand a project up for someone else, pass their owner_email — you are then recorded as the project's manager (so you keep authority), unless you are an admin, in which case you may hand off owner and manager outright. manager_email and group are optional per the operator's policy (see list_groups); a blank manager defaults to the owner."
     )]
     async fn register_project(
         &self,
         ctx: RequestContext<RoleServer>,
-        Parameters(a): Parameters<RegisterProjectArgs>,
+        Parameters(mut a): Parameters<RegisterProjectArgs>,
     ) -> Result<CallToolResult, McpError> {
-        // A user PAT registers projects it owns; the owner is its identity, not a
-        // spoofable argument. A project key / stdio uses the supplied owner_email.
-        let owner_override = match Self::auth(&ctx) {
-            Some(McpAuth::User { email, .. }) => Some(email),
+        // Resolve owner/manager from the principal: a user registers for themselves by
+        // default. Naming a different owner_email is an on-behalf registration — an
+        // admin may hand off ownership fully, while a non-admin stays the manager so
+        // they retain authority over what they stood up. A project key / stdio uses the
+        // supplied fields verbatim.
+        let actor_email = match Self::auth(&ctx) {
+            Some(McpAuth::User { email, role }) => {
+                if a.owner_email.trim().is_empty() {
+                    a.owner_email = email.clone();
+                } else if !Role::parse(&role).is_admin() && a.manager_email.trim().is_empty() {
+                    a.manager_email = email.clone();
+                }
+                Some(email)
+            }
             _ => None,
         };
-        wrap(self.do_register_project(a, owner_override).await)
+        wrap(self.do_register_project(a, actor_email).await)
     }
 
     #[tool(
@@ -1996,6 +2135,48 @@ impl AsgardMcp {
             Err(e) => return deny(e),
         };
         wrap(self.do_list_resources(&pid, a.state.as_deref()).await)
+    }
+
+    #[tool(
+        description = "List resource/budget requests awaiting human approval (state=requested) that you may see — for projects you own or manage (admins/finance see all). Requests land here only when they exceed the project's self-service cost ceiling or hit a force-review service; routine resources auto-provision. Pass project_id to narrow to one project. Clear them with approve_request / deny_request."
+    )]
+    async fn list_pending_approvals(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(a): Parameters<ListPendingApprovalsArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        wrap(
+            self.do_list_pending_approvals(Self::auth(&ctx), a.project_id)
+                .await,
+        )
+    }
+
+    #[tool(
+        description = "Approve a pending request (see list_pending_approvals); for a provisioning request the apply is enqueued immediately. Requires a user token (asg_pat_…): the project's manager or an admin may approve — the project owner cannot self-approve their own over-budget request, and a project key cannot approve at all. Returns the post-approval request (Fulfilled if it completed inline, else Approved while the apply runs in the background)."
+    )]
+    async fn approve_request(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(a): Parameters<ApprovalDecisionArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        wrap(
+            self.do_decide_request(Self::auth(&ctx), &a.request_id, a.reason.as_deref(), true)
+                .await,
+        )
+    }
+
+    #[tool(
+        description = "Deny a pending request (see list_pending_approvals). Requires a user token (asg_pat_…): the project's manager or an admin only. Records the reason and moves the request to rejected."
+    )]
+    async fn deny_request(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(a): Parameters<ApprovalDecisionArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        wrap(
+            self.do_decide_request(Self::auth(&ctx), &a.request_id, a.reason.as_deref(), false)
+                .await,
+        )
     }
 
     #[tool(

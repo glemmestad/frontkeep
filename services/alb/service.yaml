@@ -11,12 +11,17 @@ description: >-
   certificate.
 auto_approvable: true
 long_running: true
-required_fields: [name, vpc_id, subnet_ids]
+required_fields: [name]
 provisioner:
   connector: terraform
   config:
     module: aws/alb
     cloud: aws
+    # See ecs-service: spec ids win, else these fleet defaults, else the account
+    # default VPC.
+    defaults:
+      vpc_id: ${ASGARD_DEFAULT_VPC_ID}
+      subnet_ids: ${ASGARD_DEFAULT_SUBNET_IDS:csv}
 cost:
   model: usage
   estimated_monthly_usd: 20.0

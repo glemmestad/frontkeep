@@ -249,6 +249,11 @@ pub struct ProjectUpdate {
     pub name: Option<String>,
     pub description: Option<String>,
     pub budget_usd: Option<f64>,
+    /// Transfer the project to a new owner. Authority over the project follows the
+    /// owner/manager relationship, so this re-stamps cost scoping (`scope_for`).
+    pub owner_email: Option<String>,
+    /// Reassign the project's manager.
+    pub manager_email: Option<String>,
 }
 
 /// What happened to a budget change: nothing requested, applied self-service, or
@@ -696,6 +701,55 @@ impl ProjectRegistry {
                 BudgetOutcome::PendingReview(Box::new(request))
             }
         };
+
+        // Ownership: transfer owner and/or manager. Both fields are denormalized onto
+        // the runtime row and the catalog entity, so re-stamp them together; cost +
+        // project scoping (`scope_for`) follows the new relationship.
+        let new_owner = update
+            .owner_email
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let new_manager = update
+            .manager_email
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        if new_owner.is_some() || new_manager.is_some() {
+            let cur = self.require_active(project_id).await?;
+            let owner = match new_owner {
+                Some(o) => normalize_email(o)?,
+                None => cur.owner.clone(),
+            };
+            let manager = match new_manager {
+                Some(m) => normalize_email(m)?,
+                None => cur.manager.clone(),
+            };
+            self.gateway
+                .set_ownership(project_id, &owner, &manager)
+                .await?;
+            self.project_entity(
+                project_id,
+                &cur.name,
+                &cur.description,
+                &owner,
+                &manager,
+                &cur.group,
+                &cur.cost_center,
+                &cur.classification,
+                cur.budget_usd,
+                &cur.lifecycle,
+            )
+            .await?;
+            let _ = asgard_storage::audit::append(
+                &self.db,
+                &asgard_storage::audit::AuditRecord::new(actor, "project.owner_changed")
+                    .entity(format!("project:{project_id}"))
+                    .outcome("updated")
+                    .data(serde_json::json!({ "owner": owner, "manager": manager })),
+            )
+            .await;
+        }
 
         let reg = self
             .get(project_id)
@@ -2072,6 +2126,49 @@ mod tests {
         assert_eq!(updated.name, "Production Aurora");
         // Evidence untouched by a name-only change.
         assert_eq!(updated.evidence.business_owner, "biz@corp.example");
+    }
+
+    #[tokio::test]
+    async fn update_project_transfers_owner_and_manager() {
+        let (reg, wf) = registry_and_workflow().await;
+        let r = reg.register(input(), "u").await.unwrap();
+        let pid = r.project_id.clone();
+        assert_eq!(r.owner, "alice@corp.example");
+        assert_eq!(r.manager, "bob@corp.example");
+
+        // Transfer ownership; leave manager untouched.
+        let (updated, _) = reg
+            .update_project(
+                &wf,
+                &pid,
+                ProjectUpdate {
+                    owner_email: Some("carol@corp.example".into()),
+                    ..Default::default()
+                },
+                Some(500.0),
+                "user:admin",
+            )
+            .await
+            .unwrap();
+        assert_eq!(updated.owner, "carol@corp.example", "owner transferred");
+        assert_eq!(updated.manager, "bob@corp.example", "manager untouched");
+
+        // Reassign the manager too; owner stays put. Confirms it persists on re-read.
+        reg.update_project(
+            &wf,
+            &pid,
+            ProjectUpdate {
+                manager_email: Some("dave@corp.example".into()),
+                ..Default::default()
+            },
+            Some(500.0),
+            "user:admin",
+        )
+        .await
+        .unwrap();
+        let after = reg.get(&pid).await.unwrap().unwrap();
+        assert_eq!(after.owner, "carol@corp.example");
+        assert_eq!(after.manager, "dave@corp.example");
     }
 
     #[tokio::test]

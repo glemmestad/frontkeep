@@ -435,6 +435,42 @@ async fn require_project_authority(
     }
 }
 
+/// Authorize approving/rejecting a pending request. For a project-scoped request the
+/// approver must be the project's manager or hold `ApproveRequests` (admin) — the owner
+/// is deliberately not enough (see `may_approve_request`). Non-project requests keep the
+/// org-wide approver gate.
+async fn require_request_approver(
+    st: &AppState,
+    headers: &HeaderMap,
+    req: &asgard_workflow::WorkflowRequest,
+) -> Result<asgard_identity::User, ApiError> {
+    let user = current_user(st, headers).await?;
+    let permitted = match req.project_id() {
+        Some(pid) => {
+            let manager = st
+                .registry
+                .get(pid)
+                .await?
+                .map(|r| r.manager)
+                .unwrap_or_default();
+            asgard_identity::may_approve_request(
+                user.role(),
+                user.email.as_deref().unwrap_or(""),
+                &manager,
+            )
+        }
+        None => user.can(asgard_identity::Capability::ApproveRequests),
+    };
+    if permitted {
+        Ok(user)
+    } else {
+        Err(ApiError::Forbidden(format!(
+            "not authorized to approve request {} (its project's manager or an approver role only)",
+            req.id
+        )))
+    }
+}
+
 /// The cost/projects visibility scope for a user: `None` means see-everything
 /// (Admin/Finance, via the ViewAllCost capability); otherwise the caller's email,
 /// which scopes reads to the projects they own or manage. A user with no email
@@ -757,6 +793,7 @@ async fn update_project(
                 name: b.name,
                 description: b.description,
                 budget_usd: b.budget_usd,
+                ..Default::default()
             },
             ceiling,
             &actor,
@@ -2487,7 +2524,12 @@ async fn approve_request(
     headers: HeaderMap,
     Json(b): Json<ActionBody>,
 ) -> Result<Json<asgard_workflow::WorkflowRequest>, ApiError> {
-    require_cap(&st, &headers, asgard_identity::Capability::ApproveRequests).await?;
+    let req = st
+        .workflow
+        .get(&id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound(format!("request {id}")))?;
+    require_request_approver(&st, &headers, &req).await?;
     let approved = st
         .workflow
         .approve(&id, &b.actor, b.reason.as_deref())
@@ -2512,7 +2554,12 @@ async fn reject_request(
     headers: HeaderMap,
     Json(b): Json<ActionBody>,
 ) -> Result<Json<asgard_workflow::WorkflowRequest>, ApiError> {
-    require_cap(&st, &headers, asgard_identity::Capability::ApproveRequests).await?;
+    let req = st
+        .workflow
+        .get(&id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound(format!("request {id}")))?;
+    require_request_approver(&st, &headers, &req).await?;
     Ok(Json(
         st.workflow
             .reject(&id, &b.actor, b.reason.as_deref())

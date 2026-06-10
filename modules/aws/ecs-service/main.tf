@@ -34,10 +34,35 @@ data "aws_iam_policy_document" "assume" {
 # than from var.region, which is empty in the common env-driven case.
 data "aws_region" "current" {}
 
+# Network fallback so an agent without console access can still deploy. `aws_vpcs`
+# (plural) returns a list and never errors on "none found", so an empty result is
+# reported by the precondition below as a clear message rather than a raw provider
+# stack trace. Looked up only when the caller (or the fleet default) didn't supply ids.
+data "aws_vpcs" "default" {
+  count = var.vpc_id == "" ? 1 : 0
+  filter {
+    name   = "isDefault"
+    values = ["true"]
+  }
+}
+
+data "aws_subnets" "default" {
+  count = length(var.subnet_ids) == 0 ? 1 : 0
+  filter {
+    name   = "vpc-id"
+    values = [local.vpc_id]
+  }
+}
+
 locals {
-  prefix     = lower("${lookup(var.tags, "project", "asgard")}-${var.name}")
-  make_sg    = length(var.security_group_ids) == 0
-  task_sg    = local.make_sg ? [aws_security_group.task[0].id] : var.security_group_ids
+  prefix  = lower("${lookup(var.tags, "project", "asgard")}-${var.name}")
+  make_sg = length(var.security_group_ids) == 0
+  task_sg = local.make_sg ? [aws_security_group.task[0].id] : var.security_group_ids
+  # Precedence: caller-supplied id → account default VPC. The fleet-default layer
+  # (ASGARD_DEFAULT_VPC_ID/SUBNET_IDS) is applied upstream as a manifest tfvar, so by
+  # the time it reaches here it looks like a caller-supplied value.
+  vpc_id     = var.vpc_id != "" ? var.vpc_id : try(one(data.aws_vpcs.default[0].ids), "")
+  subnet_ids = length(var.subnet_ids) > 0 ? var.subnet_ids : try(data.aws_subnets.default[0].ids, [])
   exec_role  = var.execution_role_arn != "" ? var.execution_role_arn : aws_iam_role.exec[0].arn
   enable_tls = var.certificate_arn != ""
   region     = coalesce(var.region, data.aws_region.current.region)
@@ -142,8 +167,17 @@ resource "aws_iam_role_policy" "task" {
 # ---------------------------------------------------------------------------
 resource "aws_security_group" "alb" {
   name   = "${local.prefix}-alb"
-  vpc_id = var.vpc_id
+  vpc_id = local.vpc_id
   tags   = var.tags
+
+  # Fires before any network resource is created, so a missing network surfaces as
+  # this message rather than a provider error deep in the apply.
+  lifecycle {
+    precondition {
+      condition     = local.vpc_id != "" && length(local.subnet_ids) > 0
+      error_message = "No VPC/subnets resolved for ecs-service: pass vpc_id + subnet_ids, set the fleet defaults (ASGARD_DEFAULT_VPC_ID / ASGARD_DEFAULT_SUBNET_IDS), or ensure the target account has a default VPC."
+    }
+  }
 
   ingress {
     from_port   = 80
@@ -171,7 +205,7 @@ resource "aws_security_group" "alb" {
 resource "aws_security_group" "task" {
   count  = local.make_sg ? 1 : 0
   name   = "${local.prefix}-task"
-  vpc_id = var.vpc_id
+  vpc_id = local.vpc_id
   tags   = var.tags
 
   ingress {
@@ -192,7 +226,7 @@ resource "aws_lb" "this" {
   name               = substr("${local.prefix}", 0, 32)
   internal           = var.internal
   load_balancer_type = "application"
-  subnets            = var.subnet_ids
+  subnets            = local.subnet_ids
   security_groups    = [aws_security_group.alb.id]
   idle_timeout       = var.idle_timeout
   tags               = var.tags
@@ -202,7 +236,7 @@ resource "aws_lb_target_group" "this" {
   name        = substr("${local.prefix}", 0, 32)
   port        = var.container_port
   protocol    = "HTTP"
-  vpc_id      = var.vpc_id
+  vpc_id      = local.vpc_id
   target_type = "ip"
   tags        = var.tags
 
@@ -308,13 +342,20 @@ resource "aws_ecs_service" "this" {
   desired_count   = var.desired_count
   launch_type     = "FARGATE"
 
+  # Block apply until the service reaches steady state so a "provisioned" record
+  # means the tasks are actually running and passing health checks — not merely
+  # that the AWS resources exist. Paired with the circuit breaker below, a bad
+  # image surfaces as an apply failure (rolled back) rather than a green-but-dead
+  # service.
+  wait_for_steady_state = true
+
   # Keep this fraction of tasks serving through a rolling deploy. With
   # desired_count > 1 (safe on Postgres) capacity stays up while tasks are
   # replaced; the default 100 matches ECS's own default for desired_count = 1.
   deployment_minimum_healthy_percent = var.min_healthy_percent
 
   network_configuration {
-    subnets          = var.subnet_ids
+    subnets          = local.subnet_ids
     security_groups  = local.task_sg
     assign_public_ip = var.internal ? false : true
   }
