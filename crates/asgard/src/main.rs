@@ -297,6 +297,10 @@ enum ProjectCmd {
         budget_usd: Option<f64>,
         #[arg(long)]
         description: Option<String>,
+        /// Adopt an existing (brownfield) system: register in the provisional
+        /// lifecycle, flagged for triage until its first promotion.
+        #[arg(long)]
+        provisional: bool,
     },
     /// Update a project's mutable fields (id never changes).
     Update {
@@ -1161,6 +1165,7 @@ async fn main() -> anyhow::Result<()> {
                     data_class,
                     budget_usd,
                     description,
+                    provisional,
                 } => {
                     let mut m = Map::new();
                     m.insert("name".into(), json!(name));
@@ -1177,6 +1182,9 @@ async fn main() -> anyhow::Result<()> {
                     opt(&mut m, "data_class", data_class);
                     opt(&mut m, "budget_usd", budget_usd);
                     opt(&mut m, "description", description);
+                    if provisional {
+                        m.insert("provisional".into(), json!(true));
+                    }
                     run_tool(&r, "register_project", m, Shape::Auto).await;
                 }
                 ProjectCmd::Update {

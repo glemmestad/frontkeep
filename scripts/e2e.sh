@@ -976,6 +976,23 @@ curl -s -o "$WORK/pob.out" -X POST "$BASE2/mcp" -H "authorization: Bearer $PAT" 
 grep -q 'gail@corp.example' "$WORK/pob.out" && grep -q 'finn@corp.example' "$WORK/pob.out" \
   && ok "PAT on-behalf register: owner=teammate, manager=caller" || { bad "on-behalf register wrong"; cat "$WORK/pob.out"; }
 
+# 20f-ii-b. Brownfield adoption: a provisional registration is fully live —
+# the gate mints a key for it — and flagged for triage instead of blocked.
+PPROV='{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"register_project","arguments":{"name":"Finn Legacy","group":"platform","classification":"poc","provisional":true}}}'
+curl -s -o "$WORK/pprov.out" -X POST "$BASE2/mcp" -H "authorization: Bearer $PAT" -H "mcp-session-id: $PSID" \
+  -H 'content-type: application/json' -H "$MCP_ACCEPT" -d "$PPROV"
+grep -q 'provisional' "$WORK/pprov.out" && ok "provisional registration records lifecycle=provisional" || { bad "provisional register wrong"; cat "$WORK/pprov.out"; }
+PPROV_PID=$(python3 - "$WORK/pprov.out" <<'PY' 2>/dev/null
+import sys,re
+m=re.search(r'proj-\d{4}-\d{4}', open(sys.argv[1]).read())
+print(m.group(0) if m else '')
+PY
+)
+PCRED="{\"jsonrpc\":\"2.0\",\"id\":13,\"method\":\"tools/call\",\"params\":{\"name\":\"gateway_credential\",\"arguments\":{\"project_id\":\"${PPROV_PID}\"}}}"
+curl -s -o "$WORK/pcred.out" -X POST "$BASE2/mcp" -H "authorization: Bearer $PAT" -H "mcp-session-id: $PSID" \
+  -H 'content-type: application/json' -H "$MCP_ACCEPT" -d "$PCRED"
+grep -q 'asg_' "$WORK/pcred.out" && ok "provisional project mints a gateway key (live, not blocked)" || { bad "provisional project denied a key"; cat "$WORK/pcred.out"; }
+
 # 20f-iii. Approvals over MCP. A governed credential (litellm-key, auto_approvable:false)
 # parks for approval; finn — the project's manager — sees it via list_pending_approvals
 # and clears it with approve_request, so the agent loop never needs the web UI.

@@ -209,6 +209,11 @@ pub struct RegisterInput {
     pub budget_usd: Option<f64>,
     #[serde(default)]
     pub description: Option<String>,
+    /// Register an existing (brownfield) system in the `provisional` lifecycle:
+    /// fully live (keys, resources, cost) but flagged for triage until its first
+    /// promotion flips it to `active`.
+    #[serde(default)]
+    pub provisional: bool,
     #[serde(flatten)]
     pub evidence: Evidence,
 }
@@ -455,6 +460,14 @@ impl ProjectRegistry {
                 budget_usd,
             )
             .await?;
+        let lifecycle = if input.provisional {
+            self.gateway
+                .set_lifecycle(&project_id, "provisional")
+                .await?;
+            "provisional"
+        } else {
+            "active"
+        };
 
         evidence::write(&self.db, &project_id, &input.evidence).await?;
 
@@ -479,7 +492,7 @@ impl ProjectRegistry {
             &cost_center,
             &classification,
             budget_usd,
-            "active",
+            lifecycle,
         )
         .await?;
 
@@ -491,6 +504,7 @@ impl ProjectRegistry {
                 .data(serde_json::json!({
                     "owner": owner, "manager": manager, "group": group_entry.key,
                     "cost_center": cost_center, "classification": classification,
+                    "lifecycle": lifecycle,
                 })),
         )
         .await;
@@ -548,12 +562,15 @@ impl ProjectRegistry {
     }
 
     /// The gate: returns the registration only if the project is registered and
-    /// active. Used before minting keys and before provisioning resources.
+    /// live. Used before minting keys and before provisioning resources.
+    /// `provisional` (a brownfield system under triage) counts as live — it gets
+    /// keys, resources, and cost attribution like any other project; only its
+    /// first promotion flips it to `active`.
     pub async fn require_active(&self, project_id: &str) -> Result<Registration, RegistryError> {
         match self.get(project_id).await? {
             None => Err(RegistryError::NotRegistered(project_id.to_string())),
             Some(r) if !r.registered => Err(RegistryError::NotRegistered(project_id.to_string())),
-            Some(r) if r.lifecycle != "active" => {
+            Some(r) if r.lifecycle != "active" && r.lifecycle != "provisional" => {
                 Err(RegistryError::Inactive(project_id.to_string()))
             }
             Some(r) => Ok(r),
@@ -1260,6 +1277,14 @@ impl ProjectRegistry {
         let from = reg.classification.clone();
 
         self.gateway.set_classification(project_id, &target).await?;
+        // A provisional (brownfield) project graduates on its first promotion:
+        // the evidence bar it just cleared is the triage exit.
+        let lifecycle = if reg.lifecycle == "provisional" {
+            self.gateway.set_lifecycle(project_id, "active").await?;
+            "active".to_string()
+        } else {
+            reg.lifecycle.clone()
+        };
         if !reg.evidence.requested_classification.is_empty() {
             let mut ev = reg.evidence.clone();
             ev.requested_classification = String::new();
@@ -1275,7 +1300,7 @@ impl ProjectRegistry {
             &reg.cost_center,
             &target,
             reg.budget_usd,
-            &reg.lifecycle,
+            &lifecycle,
         )
         .await?;
 
@@ -1285,7 +1310,7 @@ impl ProjectRegistry {
             &asgard_storage::audit::AuditRecord::new(actor, "project.promoted")
                 .entity(format!("project:{project_id}"))
                 .outcome("promoted")
-                .data(serde_json::json!({"from": from, "to": target})),
+                .data(serde_json::json!({"from": from, "to": target, "lifecycle": lifecycle})),
         )
         .await;
         Ok(fulfilled)
@@ -2097,6 +2122,7 @@ mod tests {
             data_class: None,
             budget_usd: Some(50.0),
             description: Some("Detect fraud".into()),
+            provisional: false,
             evidence: Evidence::default(),
         }
     }
@@ -2555,6 +2581,27 @@ mod tests {
         assert_eq!(after.classification, "light-operational");
         // The met request is cleared from the evidence record.
         assert_eq!(after.evidence.requested_classification, "");
+    }
+
+    #[tokio::test]
+    async fn provisional_registration_is_live_and_graduates_on_promotion() {
+        let (r, wf) = registry_and_workflow().await;
+        let mut i = light_ready_input();
+        i.provisional = true;
+        let reg = r.register(i, "u").await.unwrap();
+        assert_eq!(reg.lifecycle, "provisional");
+        // Provisional counts as live: the gate lets keys/resources through.
+        assert!(r.require_active(&reg.project_id).await.is_ok());
+        // First promotion graduates the project to active.
+        let req = r
+            .request_promotion(&wf, &reg.project_id, "light-operational", "u")
+            .await
+            .unwrap();
+        assert_eq!(req.state, State::Approved);
+        r.fulfill_promotion(&wf, &req.id, "u").await.unwrap();
+        let after = r.get(&reg.project_id).await.unwrap().unwrap();
+        assert_eq!(after.lifecycle, "active");
+        assert_eq!(after.classification, "light-operational");
     }
 
     #[tokio::test]

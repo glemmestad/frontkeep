@@ -112,6 +112,11 @@ pub struct RegisterProjectArgs {
     pub budget_usd: Option<f64>,
     pub description: Option<String>,
     pub requester: Option<String>,
+    /// Adopt an existing (brownfield) system: registers in the `provisional`
+    /// lifecycle — fully live (keys, resources, cost attribution) but flagged
+    /// for triage until its first promotion flips it to `active`.
+    #[serde(default)]
+    pub provisional: bool,
     #[serde(flatten)]
     pub evidence: asgard_registry::Evidence,
 }
@@ -627,6 +632,7 @@ impl AsgardMcp {
             data_class: a.data_class,
             budget_usd,
             description: a.description,
+            provisional: a.provisional,
             evidence: a.evidence,
         };
         let actor = actor_email
@@ -2900,6 +2906,7 @@ mod tests {
                     budget_usd: None,
                     description: None,
                     requester: None,
+                    provisional: false,
                     evidence: Default::default(),
                 },
                 None,
