@@ -103,6 +103,16 @@ impl Role {
     }
 }
 
+/// The single authority for *who may clear a pending resource request*: an org-wide
+/// approver (`ApproveRequests`, i.e. Admin) or the subject project's **manager**. The
+/// project **owner** is deliberately excluded — the owner is typically the developer who
+/// filed the request, and self-approving one's own over-budget request would defeat the
+/// gate. Both the REST surface and the MCP surface call this so the two can't drift.
+pub fn may_approve_request(role: Role, caller_email: &str, project_manager: &str) -> bool {
+    role.can(Capability::ApproveRequests)
+        || (!caller_email.is_empty() && caller_email.eq_ignore_ascii_case(project_manager))
+}
+
 /// How OIDC sign-ins map to roles. Two independent knobs, set from env:
 ///
 /// - `admin_emails` is an *additive, promote-only* admin grant applied on every
@@ -848,6 +858,34 @@ mod tests {
         assert_eq!(Role::parse("FINANCE"), Role::Finance);
         assert_eq!(Role::parse("manager"), Role::Member); // no global manager role
         assert_eq!(Role::parse("nonsense"), Role::Member);
+    }
+
+    #[test]
+    fn approval_authority_is_manager_or_admin_never_owner() {
+        // Admin holds ApproveRequests, so approves regardless of the relationship.
+        assert!(may_approve_request(
+            Role::Admin,
+            "anyone@x.com",
+            "mgr@x.com"
+        ));
+        // The project's manager may approve (case-insensitive).
+        assert!(may_approve_request(Role::Member, "mgr@x.com", "mgr@x.com"));
+        assert!(may_approve_request(Role::Member, "MGR@x.com", "mgr@x.com"));
+        // The owner (a non-manager member) cannot self-approve their own request.
+        assert!(!may_approve_request(
+            Role::Member,
+            "owner@x.com",
+            "mgr@x.com"
+        ));
+        // Finance is read-only money — not an approver, and not the manager here.
+        assert!(!may_approve_request(
+            Role::Finance,
+            "fin@x.com",
+            "mgr@x.com"
+        ));
+        // An empty caller (e.g. a project-key path with no email) never matches a blank
+        // manager — approval must not fall open.
+        assert!(!may_approve_request(Role::Member, "", ""));
     }
 
     #[tokio::test]

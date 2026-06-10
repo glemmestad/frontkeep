@@ -106,6 +106,19 @@ pub struct WorkflowRequest {
     pub updated_at: String,
 }
 
+impl WorkflowRequest {
+    /// The project this request concerns, if any. Provision and budget requests carry
+    /// it in the payload (`project_id`); promotion requests encode it as a
+    /// `project:<id>` subject. Used to route approval authority to the project's
+    /// manager regardless of how the request type names its subject.
+    pub fn project_id(&self) -> Option<&str> {
+        if let Some(p) = self.payload.get("project_id").and_then(|v| v.as_str()) {
+            return Some(p);
+        }
+        self.subject.strip_prefix("project:")
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct NewRequest {
     pub kind: String,

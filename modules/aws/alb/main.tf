@@ -24,12 +24,16 @@ variable "tags" {
   default = {}
 }
 
+# Leave blank to fall back to a fleet default (ASGARD_DEFAULT_VPC_ID/SUBNET_IDS via the
+# manifest) or, failing that, the account's default VPC and its subnets.
 variable "vpc_id" {
-  type = string
+  type    = string
+  default = ""
 }
 
 variable "subnet_ids" {
-  type = list(string)
+  type    = list(string)
+  default = []
 }
 
 variable "security_group_ids" {
@@ -56,16 +60,36 @@ provider "aws" {
   region = var.region
 }
 
+# Network fallback (see ecs-service): looked up only when ids weren't supplied.
+# `aws_vpcs` returns a list and never errors on "none found".
+data "aws_vpcs" "default" {
+  count = var.vpc_id == "" ? 1 : 0
+  filter {
+    name   = "isDefault"
+    values = ["true"]
+  }
+}
+
+data "aws_subnets" "default" {
+  count = length(var.subnet_ids) == 0 ? 1 : 0
+  filter {
+    name   = "vpc-id"
+    values = [local.vpc_id]
+  }
+}
+
 locals {
   prefix     = substr(lower("${lookup(var.tags, "project", "asgard")}-${var.name}"), 0, 32)
   enable_tls = var.certificate_arn != ""
   make_sg    = length(var.security_group_ids) == 0
+  vpc_id     = var.vpc_id != "" ? var.vpc_id : try(one(data.aws_vpcs.default[0].ids), "")
+  subnet_ids = length(var.subnet_ids) > 0 ? var.subnet_ids : try(data.aws_subnets.default[0].ids, [])
 }
 
 resource "aws_security_group" "alb" {
   count  = local.make_sg ? 1 : 0
   name   = "${local.prefix}-alb"
-  vpc_id = var.vpc_id
+  vpc_id = local.vpc_id
   tags   = var.tags
 
   ingress {
@@ -95,16 +119,23 @@ resource "aws_lb" "this" {
   name               = local.prefix
   internal           = var.internal
   load_balancer_type = "application"
-  subnets            = var.subnet_ids
+  subnets            = local.subnet_ids
   security_groups    = local.make_sg ? [aws_security_group.alb[0].id] : var.security_group_ids
   tags               = var.tags
+
+  lifecycle {
+    precondition {
+      condition     = local.vpc_id != "" && length(local.subnet_ids) > 0
+      error_message = "No VPC/subnets resolved for alb: pass vpc_id + subnet_ids, set the fleet defaults (ASGARD_DEFAULT_VPC_ID / ASGARD_DEFAULT_SUBNET_IDS), or ensure the target account has a default VPC."
+    }
+  }
 }
 
 resource "aws_lb_target_group" "this" {
   name        = local.prefix
   port        = var.container_port
   protocol    = "HTTP"
-  vpc_id      = var.vpc_id
+  vpc_id      = local.vpc_id
   target_type = "ip"
   tags        = var.tags
 }

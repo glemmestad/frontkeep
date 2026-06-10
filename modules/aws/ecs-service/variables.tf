@@ -13,14 +13,18 @@ variable "tags" {
   default = {}
 }
 
-# Existing network the service lands in. Asgard never creates a VPC; the operator
-# supplies these from the account they are deploying into.
+# Existing network the service lands in. Asgard never creates a VPC. Leave blank to
+# fall back to a fleet default (ASGARD_DEFAULT_VPC_ID/SUBNET_IDS via the manifest) or,
+# failing that, the account's default VPC and its subnets — so an agent with no console
+# access can still deploy. See the vpc_id/subnet_ids locals in main.tf.
 variable "vpc_id" {
-  type = string
+  type    = string
+  default = ""
 }
 
 variable "subnet_ids" {
-  type = list(string)
+  type    = list(string)
+  default = []
 }
 
 # Extra security groups attached to the service tasks. Empty ⇒ the module creates

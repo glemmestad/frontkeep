@@ -530,8 +530,12 @@ mod tests {
         assert!(cat.get("alb").unwrap().auto_approvable);
         let ecs = cat.get("ecs-service").unwrap();
         assert_eq!(ecs.connector(), "terraform");
-        assert!(ecs.required_fields.contains(&"vpc_id".to_string()));
-        assert!(ecs.required_fields.contains(&"subnet_ids".to_string()));
+        // Network is no longer required from the caller: it falls back to the fleet
+        // default env, then the account default VPC (resolved in the TF module).
+        assert!(ecs.required_fields.contains(&"name".to_string()));
+        assert!(ecs.required_fields.contains(&"image".to_string()));
+        assert!(!ecs.required_fields.contains(&"vpc_id".to_string()));
+        assert!(!ecs.required_fields.contains(&"subnet_ids".to_string()));
     }
 
     // Terraform `module` paths must be relative to `modules_dir` (the modules-tree
