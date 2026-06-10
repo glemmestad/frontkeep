@@ -1,3 +1,10 @@
+# [0.20.0](https://github.com/glemmestad/asgard/compare/v0.19.0...v0.20.0) (2026-06-10)
+
+
+### Features
+
+* close MCP-driven provisioning gaps (approvals, network, ownership, ECS health) ([bc6b1f1](https://github.com/glemmestad/asgard/commit/bc6b1f1591a92e3314109b2f7127df399d7e60c6))
+
 # [0.19.0](https://github.com/glemmestad/asgard/compare/v0.18.2...v0.19.0) (2026-06-09)
 
 
