@@ -909,6 +909,7 @@ impl ProvisionService {
         question: &str,
         budgets: HashMap<String, f64>,
     ) -> Result<String, ProvisionError> {
+        let account_total = self.account_total(as_of_day).await?;
         cost::qa::answer_cost_question(
             gateway,
             self.rollup_repo(),
@@ -918,6 +919,7 @@ impl ProvisionService {
             as_of_day,
             question,
             budgets,
+            account_total,
         )
         .await
         .map_err(|e| ProvisionError::Backend(format!("cost q&a: {e}")))

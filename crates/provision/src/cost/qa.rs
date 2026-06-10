@@ -22,6 +22,10 @@ pub struct CostQaTools {
     repo: CostRollupRepo,
     as_of_day: String,
     budgets: HashMap<String, f64>,
+    /// The whole cloud bill for the month, if an `account-total` source is wired.
+    /// The honest denominator for tagged-% — `None` reports `n/a`, never a
+    /// misleading 100%.
+    account_total: Option<f64>,
 }
 
 impl CostQaTools {
@@ -30,11 +34,17 @@ impl CostQaTools {
             repo,
             as_of_day: as_of_day.into(),
             budgets: HashMap::new(),
+            account_total: None,
         }
     }
 
     pub fn with_budgets(mut self, budgets: HashMap<String, f64>) -> Self {
         self.budgets = budgets;
+        self
+    }
+
+    pub fn with_account_total(mut self, account_total: Option<f64>) -> Self {
+        self.account_total = account_total;
         self
     }
 }
@@ -125,7 +135,8 @@ impl ToolExecutor for CostQaTools {
                     .await
                     .map_err(|e| e.to_string())?;
                 let tagged: f64 = facts.iter().map(|f| f.mtd_usd).sum();
-                serde_json::to_value(report::tagged_report(tagged, None)).unwrap_or(Value::Null)
+                serde_json::to_value(report::tagged_report(tagged, self.account_total))
+                    .unwrap_or(Value::Null)
             }
             "anomalies" => {
                 let rows = self
@@ -260,8 +271,11 @@ pub async fn answer_cost_question(
     as_of_day: &str,
     question: &str,
     budgets: HashMap<String, f64>,
+    account_total: Option<f64>,
 ) -> Result<String, GatewayError> {
-    let tools = CostQaTools::new(repo, as_of_day.to_string()).with_budgets(budgets);
+    let tools = CostQaTools::new(repo, as_of_day.to_string())
+        .with_budgets(budgets)
+        .with_account_total(account_total);
     // The deterministic mock provider can't reason over tool calls, so out of the
     // box (no real model wired) we answer with a grounded briefing built directly
     // from the tools. Real providers run the genuine tool-calling loop below.
@@ -335,5 +349,18 @@ mod tests {
         // Tagged-% has no denominator wired → honest n/a, never 100.
         let tagged = t.call("untagged", &json!({})).await.unwrap();
         assert!(tagged.contains("\"tagged_pct\":null"), "got {tagged}");
+    }
+
+    #[tokio::test]
+    async fn untagged_uses_the_wired_account_total_denominator() {
+        // With a real account-total the NL Q&A reports a genuine tagged-% instead
+        // of n/a — the "governed share of spend" headline.
+        let t = seeded().await.with_account_total(Some(10.0));
+        let tagged = t.call("untagged", &json!({})).await.unwrap();
+        assert!(
+            tagged.contains("\"account_total_usd\":10.0"),
+            "got {tagged}"
+        );
+        assert!(!tagged.contains("\"tagged_pct\":null"), "got {tagged}");
     }
 }
