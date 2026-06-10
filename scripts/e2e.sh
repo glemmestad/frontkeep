@@ -292,6 +292,8 @@ curl -s -o "$WORK/boot.out" -X POST "$BASE/mcp" -H "authorization: Bearer $KEY" 
   -H 'content-type: application/json' -H "$MCP_ACCEPT" -d "$BOOT"
 grep -q 'AGENTS.md' "$WORK/boot.out" && grep -q 'RUST.md' "$WORK/boot.out" \
   && ok "MCP bootstrap inlines AGENTS.md + standards in one call" || { bad "bootstrap did not return inlined seed files"; cat "$WORK/boot.out"; }
+# The seed must never re-teach a removed surface (gateway_chat left MCP; inference is out-of-band).
+grep -q 'gateway_chat' "$WORK/boot.out" && bad "bootstrap output re-teaches gateway_chat (removed surface)" || ok "bootstrap output is free of removed surfaces"
 grep -q '"guidance_put"' "$WORK/tools.out" && ok "MCP exposes guidance tools (guidance_put)" || bad "guidance_put tool missing from MCP"
 grep -q '"recipe_get"' "$WORK/tools.out" && ok "MCP exposes recipe tools (recipe_get)" || bad "recipe_get tool missing from MCP"
 grep -q '"mcp_catalog_list"' "$WORK/tools.out" && grep -q '"mcp_catalog_publish"' "$WORK/tools.out" \

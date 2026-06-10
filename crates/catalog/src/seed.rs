@@ -639,6 +639,29 @@ mod tests {
     }
 
     #[test]
+    fn no_seed_module_references_removed_surface() {
+        // The seed is the first thing a new agent reads; it must never re-teach a
+        // surface the product removed. `gateway_chat` left MCP (inference is
+        // out-of-band service usage) and the entity-manifest framing predates the
+        // service catalog.
+        for m in SEED.iter() {
+            for needle in [
+                "gateway_chat",
+                "agent.yaml",
+                "prompt.yaml",
+                "dataset.yaml",
+                "eval.yaml",
+            ] {
+                assert!(
+                    !m.body.contains(needle),
+                    "seed module '{}' still references removed surface '{needle}'",
+                    m.id
+                );
+            }
+        }
+    }
+
+    #[test]
     fn adoption_record_lists_selected_addons_and_overlays() {
         let p = plan(
             &["terraform".into()],

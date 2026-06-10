@@ -12,12 +12,14 @@ The control plane's **MCP server is your front door.** There is no ticket queue 
 
 Do these in order. Stop as soon as you have enough context for the task in front of you.
 
-1. **Examine this repo.** Understand what is being built here and who owns it. Read the existing manifests (`agent.yaml`, `prompt.yaml`, `mcp.yaml`, `eval.yaml`, `dataset.yaml`), the code, and the tests before changing anything.
+1. **Examine this repo.** Understand what is being built here and who owns it. Read the README, any existing `AGENTS.md`/`CLAUDE.md` guidance, the code, and the tests before changing anything.
 2. **Learn the standards.** Call `list_standards` to see which standard sets apply, then `get_standards` to fetch them. These are the enterprise's coding, security, and workflow conventions — your output must conform. The `.agent/` files in this repo are an offline copy; the MCP tools are the live source of truth, so prefer them when reachable.
-3. **Register the project.** Call `register_project` with the project name, owner, and intended data classification. This is a **hard gate**, not a formality: the control plane will not issue a gateway key, route a model call, or run a sandboxed invocation for an unregistered project, because every chargeable resource must carry a project owner for cost attribution and audit. Registration mints a stable `proj-YYYY-NNNN` id; record it (see "This project's id" below).
+3. **Register the project.** Call `register_project` with the project name, owner, and intended data classification. This is a **hard gate**, not a formality: the control plane will not issue a gateway key, route a model call, or provision a resource for an unregistered project, because every chargeable resource must carry a project owner for cost attribution and audit. Registration mints a stable `proj-YYYY-NNNN` id; record it (see "This project's id" below).
 4. **Build to the standards.** Write the code. When you need a shared capability (a model, an existing tool/MCP server, storage, a secret), discover it and request it through the control plane rather than wiring a provider directly. Verify your work end to end before claiming it is done.
 
 You should be able to go from an empty repo to a working, governed component **without filing a ticket or waiting on a person.** If you can't, that is a gap — surface it (see the escalation list at the bottom).
+
+**Already have an `AGENTS.md` or `CLAUDE.md`?** Merge, don't replace. Keep the repo's existing guidance and add the Asgard sections it lacks — the project id, the MCP tools, the gateway rule. The `.agent/` files are additive.
 
 ---
 
@@ -29,33 +31,37 @@ These are the tools the MCP server exposes. Use them instead of inventing your o
 |---|---|---|
 | `list_standards` | List the available enterprise standard sets (coding, security, workflow, language add-ons). | First, to see what applies. |
 | `get_standards` | Fetch the full text of a standard set. | Right after `list_standards`. |
-| `seed_plan` | Given this repo's languages + a description of the work, return the minimal set of seed files to add (core + language add-ons + domain overlays + templates). | When setting a repo up, to pull only the guidance the work needs. |
-| `seed_get` | Fetch one seed file's body + the path to write it to. | For each file `seed_plan` returned. |
+| `bootstrap` | Return the seed plan for this repo with every file's body inlined — the one-shot repo setup. | When setting a repo up, instead of the `seed_plan`/`seed_get` loop. |
+| `seed_plan` / `seed_get` | Plan the minimal seed set (core + language add-ons + domain overlays + templates), then fetch each file's body. | The fine-grained alternative to `bootstrap`. |
 | `register_project` | Register a project; mints a stable `proj-YYYY-NNNN` id with an owner and data classification. | Before requesting any chargeable resource. **Mandatory gate.** |
-| `catalog_search` | Search the entity catalog by kind and/or free-text query. | To discover existing agents, prompts, tools, models, datasets, evals before building your own. |
-| `catalog_get` | Fetch a single entity by `kind` / `namespace` / `name`. | To read the full spec of something you found. |
-| `request_resource` | Request a shared resource for your project (storage, secret, tool access, etc.) through the governed catalog. | When your task needs shared infrastructure. |
-| `gateway_credential` | Issue a per-project virtual key for the model gateway. | Before making model calls. |
-| `gateway_chat` | Invoke an allowed model **through the gateway** (budget, policy, guardrails, audit, kill switch all apply). | For every model call. Never call a provider SDK directly. |
-| `cost_report` | Report spend attributed to a project. | To check budget before/after work. |
+| `list_services` / `get_service` | Discover the catalog of provisionable services (storage, databases, compute, secrets, LLM access, …) and read one manifest. | Before requesting a resource — to see what exists and what it needs. |
+| `request_resource` | Request a service from the catalog for your project. Cheap, reversible types auto-approve; risky ones route to a human. | When your task needs infrastructure. |
+| `list_resources` / `get_resource` | List the project's provisioned resources; poll one for async status and outputs. | After requesting, to pick up results. |
+| `gateway_credential` | Mint the project's virtual key for the model gateway. | Before making model calls. |
+| `get_secret` | Fetch a provisioned secret's value at runtime (audited, never logged). | When your code needs a secret a service minted. |
+| `cost_report` / `project_state` | Spend attributed to the project; live budget / kill-switch state. | Before and after expensive work. |
+| `promotion_status` / `request_promotion` | Read the promotion checklist; request a one-step classification promotion. | When the project outgrows its tier. |
+
+**Calling models is out-of-band, on purpose.** The MCP server is the control plane: it registers, provisions, and mints credentials. To call a model, mint the project key with `gateway_credential`, then POST to the gateway endpoint (`/api/gateway/chat`, OpenAI-compatible) with that key. Budget, the data-class × model policy, guardrails, audit, and the kill switch all apply there.
 
 Two rules that the whole platform depends on:
 
-- **Every model call goes through `gateway_chat`.** Calling OpenAI/Anthropic/Bedrock (or any provider) directly bypasses budgets, the data-class × model policy, guardrails, and the audit trail. It is the failure mode the control plane exists to prevent.
+- **Every model call goes through the gateway** — your project's key against the gateway endpoint. Calling OpenAI/Anthropic/Bedrock (or any provider) directly bypasses budgets, the data-class × model policy, guardrails, and the audit trail. It is the failure mode the control plane exists to prevent.
 - **Every resource belongs to a registered project.** No anonymous spend. If you find yourself about to provision something for an unregistered project, register first.
 
 ---
 
 ## Discover before you build
 
-The catalog is machine-readable on purpose. Before writing a new agent, prompt, tool, or eval, search for one that already exists:
+The catalog is machine-readable on purpose. Before building something new, check what the org already has:
 
-- `catalog_search` with a `kind` (e.g. `Agent`, `Prompt`, `Tool`, `Model`, `Dataset`, `Eval`, `Project`) and/or a `query`.
-- `catalog_get` to read the full spec of a hit.
+- `list_services` / `get_service` — the provisionable service catalog (storage, databases, compute, LLM access, secrets, …).
+- `mcp_catalog_list` — MCP servers the org has published and vetted.
+- `skills_catalog_list` — agent skills the org has shared (install with `skills_catalog_install`).
+- `guidance_list` / `recipe_list` — governed how-to playbooks and narrated runbooks.
+- `catalog_search` / `catalog_get` — the entity catalog, where the org ingests one.
 
-Reusing a vetted entity is cheaper and safer than re-deriving it. Two entities that do the same thing is the duplication this catalog exists to prevent.
-
-Entities are referenced by **EntityRef**: `kind:namespace/name` (e.g. `agent:default/code-reviewer`, `group:default/platform`, `model:default/gpt-4o`). Namespace defaults to `default`.
+Reusing a vetted service, tool, or skill is cheaper and safer than re-deriving it. Two things that do the same job is the duplication this catalog exists to prevent.
 
 ---
 

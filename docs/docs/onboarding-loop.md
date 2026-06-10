@@ -16,11 +16,15 @@ Asgard's headline workflow is a **governed onboarding loop** for AI/agent work, 
 ```text
 list_standards / get_standards   →  the conventions your output must meet
 register_project                 →  the mandatory gate (mints proj-YYYY-NNNN)
-catalog_search / catalog_get     →  discover what already exists
-gateway_credential / gateway_chat→  call models through the governed gateway
+list_services / get_service      →  discover what you can provision
 request_resource                 →  provision infra for your project
+gateway_credential               →  mint the project's LLM key
 cost_report                      →  spend attributed to your project
 ```
+
+Inference itself is deliberately **not** an MCP tool — it's service usage, not
+control plane. Mint the key, then POST to `/api/gateway/chat` with it (see
+[Connect an agent](connect-agent.md)).
 
 ## 2. Registration is the gate
 
@@ -69,5 +73,5 @@ Resources are requested through Asgard so they're owned, governed, and cost-tagg
 Every provisioned resource is stamped with `project=<id>` (and owner/group/cost-center) so its cost flows into the same rollup as model spend.
 
 :::note Provisioning backend
-The shipped backend is a **dry-run stub**: it computes the plan, tags and a cost estimate and returns deterministic outputs without touching any cloud — enough to drive the whole request → approve → fulfill → cost loop. A live cloud backend implements the same `Provisioner` trait and is selected by configuration; turning it on is an explicit operator decision.
+The universal backend is the **Terraform connector**: a service manifest plus a Terraform module, no core code. A service without live credentials falls back to a dry-run stub that computes the plan, tags, and a cost estimate — enough to drive the whole request → approve → fulfill → cost loop without touching a cloud. Arming live provisioning is an explicit operator decision.
 :::

@@ -1609,7 +1609,7 @@ impl AsgardMcp {
         Ok(json!({
             "tier": tier.as_str(),
             "files": files,
-            "next": "Each entry's `body` is the actual file content. Write it verbatim to its `path` (create directories as needed) — actually create the files, do not summarize or just describe them. Then call register_project.",
+            "next": "Each entry's `body` is the actual file content. Write each NEW file verbatim to its `path` (create directories as needed) — actually create the files, do not summarize or just describe them. If a file already exists (an AGENTS.md or CLAUDE.md in an existing repo), do NOT overwrite it: merge — keep the repo's guidance and add the Asgard sections it lacks (the project id, the MCP tools, the gateway rule). The .agent/ files are additive. Then call register_project.",
         })
         .to_string())
     }
@@ -2505,9 +2505,12 @@ impl AsgardMcp {
             PromptMessageRole::User,
             "Set this repository up on Asgard now. Do it, don't describe it:\n\
              1. Call the `bootstrap` tool.\n\
-             2. For every file it returns, write the `body` verbatim to its `path` \
+             2. For every NEW file it returns, write the `body` verbatim to its `path` \
              (create directories as needed) — actually create the files on disk; do \
-             not paraphrase or just summarize what the seed contains.\n\
+             not paraphrase or just summarize what the seed contains. If a file \
+             already exists (e.g. this repo has an AGENTS.md or CLAUDE.md), merge \
+             instead of overwriting: keep the repo's guidance and add the Asgard \
+             sections it lacks.\n\
              3. Call `register_project` to register this project — ask me for the \
              owner, budget, and data classification if you don't already have them.\n\
              Start with step 1 now.",
