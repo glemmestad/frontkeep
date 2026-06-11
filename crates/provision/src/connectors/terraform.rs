@@ -33,7 +33,7 @@ use serde_json::{Map, Value};
 use tokio::process::Command;
 use tokio::sync::Mutex;
 
-use asgard_storage::leases::Leases;
+use frontkeep_storage::leases::Leases;
 
 use crate::{
     Plan, ProvisionError, ProvisionRequest, Provisioned, Provisioner, RunLogStore, TfStateStore,
@@ -312,7 +312,7 @@ impl TerraformConnector {
         copy_module(&module, wd)?;
         let vars = tfvars(req, plan, overrides);
         std::fs::write(
-            wd.join("asgard.auto.tfvars.json"),
+            wd.join("frontkeep.auto.tfvars.json"),
             serde_json::to_vec_pretty(&vars).unwrap_or_default(),
         )
         .map_err(|e| ProvisionError::Backend(format!("write tfvars: {e}")))?;
@@ -388,7 +388,7 @@ impl TerraformConnector {
         wd: &Path,
     ) -> Result<Provisioned, ProvisionError> {
         let version = self.prepare(req, plan, overrides, wd).await?;
-        let started = asgard_storage::now();
+        let started = frontkeep_storage::now();
         let (log, applied) = self
             .run_capture(wd, &["apply", "-auto-approve", "-input=false", "-no-color"])
             .await;
@@ -455,7 +455,7 @@ impl TerraformConnector {
         // restart the dir is gone but the state lives in the DB.
         let plan = self.plan(req).await?;
         let version = self.prepare(req, &plan, &Value::Null, wd).await?;
-        let started = asgard_storage::now();
+        let started = frontkeep_storage::now();
         let (log, destroyed) = self
             .run_capture(
                 wd,
@@ -579,7 +579,7 @@ impl TerraformConnector {
         started_at: &str,
     ) {
         if let (Some(store), Some(rid)) = (&self.run_log, &req.resource_id) {
-            let finished = asgard_storage::now();
+            let finished = frontkeep_storage::now();
             if let Err(e) = store
                 .append(
                     rid,
@@ -891,16 +891,16 @@ mod tests {
     /// snapshotted into the DB and is re-hydrated on the next run.
     #[tokio::test]
     async fn state_survives_an_ephemeral_work_dir() {
-        use asgard_storage::Db;
+        use frontkeep_storage::Db;
 
         let dbpath =
-            std::env::temp_dir().join(format!("asgard-tf-{}.db", asgard_storage::new_uid()));
+            std::env::temp_dir().join(format!("frontkeep-tf-{}.db", frontkeep_storage::new_uid()));
         let db = Db::connect(&format!("sqlite://{}", dbpath.display()))
             .await
             .unwrap();
         db.migrate().await.unwrap();
         let work_root =
-            std::env::temp_dir().join(format!("asgard-tfwork-{}", asgard_storage::new_uid()));
+            std::env::temp_dir().join(format!("frontkeep-tfwork-{}", frontkeep_storage::new_uid()));
         let conn = TerraformConnector::new("terraform", PathBuf::from("/modules"), work_root)
             .with_state(Arc::new(TfStateStore::new(db, [0x33; 32])));
 
@@ -929,10 +929,12 @@ mod tests {
     /// Gated on a durable store: without one the work dir *is* the state.
     #[tokio::test]
     async fn prune_work_root_clears_orphans_but_keeps_cache() {
-        use asgard_storage::Db;
+        use frontkeep_storage::Db;
 
-        let work_root =
-            std::env::temp_dir().join(format!("asgard-tfprune-{}", asgard_storage::new_uid()));
+        let work_root = std::env::temp_dir().join(format!(
+            "frontkeep-tfprune-{}",
+            frontkeep_storage::new_uid()
+        ));
         let orphan = work_root.join("proj-2026-0003").join("ecr-credential");
         let cache = work_root.join(".plugin-cache");
         std::fs::create_dir_all(orphan.join("ci-push-42")).unwrap();
@@ -945,8 +947,10 @@ mod tests {
         no_store.prune_work_root();
         assert!(orphan.exists(), "without a store nothing is reclaimed");
 
-        let dbpath =
-            std::env::temp_dir().join(format!("asgard-tfprune-{}.db", asgard_storage::new_uid()));
+        let dbpath = std::env::temp_dir().join(format!(
+            "frontkeep-tfprune-{}.db",
+            frontkeep_storage::new_uid()
+        ));
         let db = Db::connect(&format!("sqlite://{}", dbpath.display()))
             .await
             .unwrap();
@@ -965,10 +969,10 @@ mod tests {
     /// durable, and leaves it alone otherwise (tests keep state in the dir).
     #[tokio::test]
     async fn gc_work_dir_removes_scratch_only_with_durable_state() {
-        use asgard_storage::Db;
+        use frontkeep_storage::Db;
 
         let work_root =
-            std::env::temp_dir().join(format!("asgard-tfgc-{}", asgard_storage::new_uid()));
+            std::env::temp_dir().join(format!("frontkeep-tfgc-{}", frontkeep_storage::new_uid()));
         let r = req();
 
         let no_store =
@@ -978,8 +982,10 @@ mod tests {
         no_store.gc_work_dir(&wd);
         assert!(wd.exists(), "without a store the work dir is left in place");
 
-        let dbpath =
-            std::env::temp_dir().join(format!("asgard-tfgc-{}.db", asgard_storage::new_uid()));
+        let dbpath = std::env::temp_dir().join(format!(
+            "frontkeep-tfgc-{}.db",
+            frontkeep_storage::new_uid()
+        ));
         let db = Db::connect(&format!("sqlite://{}", dbpath.display()))
             .await
             .unwrap();
@@ -999,11 +1005,13 @@ mod tests {
     /// checked before the working dir is touched.
     #[tokio::test]
     async fn cross_instance_lease_blocks_concurrent_apply() {
-        use asgard_storage::leases::Leases;
-        use asgard_storage::Db;
+        use frontkeep_storage::leases::Leases;
+        use frontkeep_storage::Db;
 
-        let dbpath =
-            std::env::temp_dir().join(format!("asgard-tflease-{}.db", asgard_storage::new_uid()));
+        let dbpath = std::env::temp_dir().join(format!(
+            "frontkeep-tflease-{}.db",
+            frontkeep_storage::new_uid()
+        ));
         let db = Db::connect(&format!("sqlite://{}", dbpath.display()))
             .await
             .unwrap();
