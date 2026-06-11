@@ -1,3 +1,10 @@
+# [0.24.0](https://github.com/glemmestad/asgard/compare/v0.23.0...v0.24.0) (2026-06-11)
+
+
+### Features
+
+* **site:** land the agent-protagonist positioning across tagline, Why, CTA, and meta ([#48](https://github.com/glemmestad/asgard/issues/48)) ([db75326](https://github.com/glemmestad/asgard/commit/db75326a67d87cb872cac90a65622240c122fad0))
+
 # [0.23.0](https://github.com/glemmestad/asgard/compare/v0.22.0...v0.23.0) (2026-06-11)
 
 
