@@ -578,7 +578,6 @@ plaintext, or the audit log.
 | `FRONTKEEP_DATABASE_URL` | `sqlite://…` or `postgres://…`. Migrations run on boot. | `sqlite://frontkeep.db` |
 | `FRONTKEEP_BIND` | Listen address. | `0.0.0.0:8080` |
 | `FRONTKEEP_SECRET_KEY` | 64 hex chars (32 bytes) for the secret store. From your KMS. **Load-bearing and one-way — changing it orphans every stored secret** (see Step 2). | dev key (insecure) |
-| `FRONTKEEP_SYSTEM_NAME` | Display name the dashboard rebrands to (see "Rebranding" below). | `Frontkeep` |
 | `FRONTKEEP_ADMIN_USER` | Initial admin username. | `admin` |
 | `FRONTKEEP_ADMIN_PASSWORD` | Initial admin password. If unset and no admin exists, one is generated + logged once. | (generated) |
 | `FRONTKEEP_OIDC_DOMAIN` | IdP domain; presence enables SSO. Endpoints derived as `/authorize`, `/oauth/token`, `/userinfo`. | (off) |
@@ -606,23 +605,6 @@ plaintext, or the audit log.
 Provider keys for inference backends (e.g. `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`)
 activate the corresponding inference modules when present; see
 [Inference backends](./inference-backends.md).
-
----
-
-## Rebranding the dashboard
-
-Set **`FRONTKEEP_SYSTEM_NAME`** (e.g. `Acme Control Plane`) to rebrand the deployment. It is
-**cosmetic and UI-only** — it changes:
-
-- the browser tab title,
-- the header brand text (every `.brand` element), and
-- the logo glyph (the first letter of the name),
-
-served via `GET /api/auth/config` so the change is live on next page load. It does
-**not** rename anything functional: the MCP server still identifies as `frontkeep` in
-the `initialize` handshake, project ids keep the `proj-YYYY-NNNN` shape, env var
-names stay `FRONTKEEP_*`, and log lines / API paths are unchanged. Set it once on the
-process; there's nothing else to configure.
 
 ---
 
