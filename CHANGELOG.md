@@ -1,3 +1,10 @@
+# [0.25.0](https://github.com/glemmestad/asgard/compare/v0.24.0...v0.25.0) (2026-06-11)
+
+
+### Features
+
+* **site:** redesign marketing site in HashiCorp/Terraform/Databricks aesthetic — no gradients, no glow, no reveals ([#49](https://github.com/glemmestad/asgard/issues/49)) ([26ba3d7](https://github.com/glemmestad/asgard/commit/26ba3d722b1ea48f02099735c8782c6f276871cc))
+
 # [0.24.0](https://github.com/glemmestad/asgard/compare/v0.23.0...v0.24.0) (2026-06-11)
 
 
