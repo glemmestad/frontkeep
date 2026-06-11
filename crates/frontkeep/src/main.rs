@@ -2224,7 +2224,6 @@ async fn serve(database_url: &str, bind: &str, config_path: Option<PathBuf>) -> 
         provision,
         core.identity.clone(),
     )
-    .with_system_name(std::env::var("FRONTKEEP_SYSTEM_NAME").unwrap_or_default())
     .with_system_cost_key(system_cost_key)
     .with_cost_qa_model(cost_qa_model)
     .with_oidc(oidc.clone())
@@ -2417,13 +2416,9 @@ async fn serve(database_url: &str, bind: &str, config_path: Option<PathBuf>) -> 
         core.gateway_repo.clone(),
         state.identity.clone(),
     );
-    let system_name = state.system_name.clone();
     let app = frontkeep_api::router(state)
         .merge(mcp_router)
-        .fallback(move |uri: Uri| {
-            let system_name = system_name.clone();
-            async move { static_handler(uri, system_name).await }
-        });
+        .fallback(static_handler);
     let listener = tokio::net::TcpListener::bind(bind).await?;
     tracing::info!(
         "frontkeep on http://{bind}  (UI at /, REST at /api, GraphQL at /graphql, MCP at /mcp)"
@@ -3243,7 +3238,7 @@ fn load_config(path: Option<PathBuf>) -> Config {
     Config::default()
 }
 
-async fn static_handler(uri: Uri, system_name: String) -> Response {
+async fn static_handler(uri: Uri) -> Response {
     let raw = uri.path().trim_start_matches('/');
     // The embedded docs site owns everything under /docs. Branch here, before the
     // UI's SPA fallback, so a missing docs page serves the docs 404 — not the app.
@@ -3266,13 +3261,6 @@ async fn static_handler(uri: Uri, system_name: String) -> Response {
         .first_or_octet_stream()
         .as_ref()
         .to_string();
-    if served == "index.html" {
-        // Inject the configured system name into the shell <title> so the rebrand
-        // shows on first paint (and with JS off), not just after the runtime
-        // /api/auth/config fetch.
-        let body = brand_index_html(&String::from_utf8_lossy(&file.data), &system_name);
-        return ([(header::CONTENT_TYPE, ct)], body).into_response();
-    }
     ([(header::CONTENT_TYPE, ct)], file.data.into_owned()).into_response()
 }
 
@@ -3325,40 +3313,9 @@ const DOCS_NOT_BUNDLED: &str = "<!doctype html><meta charset=utf-8><title>Docs n
 docs at <a href=\"https://frontkeep.dev\">frontkeep.dev</a>.</p>\
 <p><a href=\"/\">← Back to Frontkeep</a></p>";
 
-/// Replace the static `<title>Frontkeep</title>` shell title with the configured
-/// system name. No-op when unset or still the default, so the stock build is
-/// untouched. Keeps the UI a single embedded file (no build step) while making
-/// the rebrand complete server-side.
-fn brand_index_html(html: &str, system_name: &str) -> String {
-    let name = system_name.trim();
-    if name.is_empty() || name == "Frontkeep" {
-        return html.to_string();
-    }
-    let safe = name
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;");
-    html.replace(
-        "<title>Frontkeep</title>",
-        &format!("<title>{safe}</title>"),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn brand_index_html_rewrites_title_only_when_configured() {
-        let shell = "<html><head><title>Frontkeep</title></head></html>";
-        // Default / unset → untouched.
-        assert_eq!(brand_index_html(shell, "Frontkeep"), shell);
-        assert_eq!(brand_index_html(shell, ""), shell);
-        // Configured name → title rebranded.
-        assert!(brand_index_html(shell, "Acme Corp").contains("<title>Acme Corp</title>"));
-        // HTML-escaped so a stray angle bracket can't break out of the title.
-        assert!(brand_index_html(shell, "A<b>").contains("<title>A&lt;b&gt;</title>"));
-    }
 
     #[test]
     fn docs_handler_missing_page_is_404() {
