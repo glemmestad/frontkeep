@@ -1,3 +1,10 @@
+# [0.26.0](https://github.com/glemmestad/asgard/compare/v0.25.1...v0.26.0) (2026-06-11)
+
+
+### Features
+
+* cut the first Frontkeep release (0.26.0) ([#52](https://github.com/glemmestad/asgard/issues/52)) ([a459dc1](https://github.com/glemmestad/asgard/commit/a459dc1ef4c13df1680bdf2fb5a5738e16452fcb))
+
 ## [0.25.1](https://github.com/glemmestad/frontkeep/compare/v0.25.0...v0.25.1) (2026-06-11)
 
 
