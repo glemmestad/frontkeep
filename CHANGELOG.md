@@ -1,3 +1,10 @@
+## [0.26.2](https://github.com/glemmestad/frontkeep/compare/v0.26.1...v0.26.2) (2026-06-17)
+
+
+### Bug Fixes
+
+* **provision:** serialize terraform init against the shared plugin cache ([ef03dd8](https://github.com/glemmestad/frontkeep/commit/ef03dd81ccf54a638db0e936edcd14eb68808f4c))
+
 ## [0.26.1](https://github.com/glemmestad/frontkeep/compare/v0.26.0...v0.26.1) (2026-06-11)
 
 
