@@ -15,13 +15,16 @@
 //! Disk is bounded two ways so the control-plane volume can't fill as resources
 //! accumulate. First, a shared `TF_PLUGIN_CACHE_DIR` ([`with_plugin_cache`]) means
 //! one provider copy serves every working dir instead of each `init` carrying its
-//! own ~600 MB download. Second, with a durable state store attached the scratch
+//! own ~600 MB download — and because that cache is not concurrency-safe, the
+//! `init` that populates it is serialized process-wide ([`init`]). Second, with a
+//! durable state store attached the scratch
 //! work dir is removed after every apply/destroy ([`gc_work_dir`]) — state lives
 //! in the DB, so each dir is rebuilt on its next run. Together these cap usage at
 //! the single cache plus whatever is actively running, regardless of how many
 //! distinct resource names (e.g. per-pipeline credentials) are ever provisioned.
 //!
 //! [`with_plugin_cache`]: TerraformConnector::with_plugin_cache
+//! [`init`]: TerraformConnector::init
 //! [`gc_work_dir`]: TerraformConnector::gc_work_dir
 
 use std::collections::HashMap;
@@ -111,10 +114,18 @@ pub struct TerraformConnector {
     /// Shared provider plugin cache exported as `TF_PLUGIN_CACHE_DIR` to every
     /// terraform run, so one ~600 MB provider download is symlinked into all
     /// working dirs instead of each `init` fetching its own. `None` leaves
-    /// terraform's per-workdir default (tests). The cache is concurrency-safe for
-    /// reads; the only race is the first fetch of a given provider version (rare,
-    /// and terraform retries) — a non-issue against a volume that fills otherwise.
+    /// terraform's per-workdir default (tests). The cache is *not* concurrency-safe:
+    /// two `init`s racing to write the same provider binary hit `text file busy`
+    /// (ETXTBSY) on the executable, so [`init`](Self::init) serializes the
+    /// cache-populating step via `init_gate`.
     plugin_cache: Option<PathBuf>,
+    /// Serializes the shared-cache-populating `init` across concurrent ops in this
+    /// process. `TF_PLUGIN_CACHE_DIR` is not concurrency-safe (see `plugin_cache`):
+    /// two ops provisioning different resources in one pipeline race to write the
+    /// same provider binary and one fails with ETXTBSY. Held only around `init`
+    /// (apply/destroy stay parallel) and only when a shared cache is set — without
+    /// one each work dir fetches its own copy and there is nothing to contend on.
+    init_gate: Mutex<()>,
 }
 
 impl TerraformConnector {
@@ -129,6 +140,7 @@ impl TerraformConnector {
             tf_lease_ttl: 600,
             run_log: None,
             plugin_cache: None,
+            init_gate: Mutex::new(()),
         }
     }
 
@@ -317,8 +329,23 @@ impl TerraformConnector {
         )
         .map_err(|e| ProvisionError::Backend(format!("write tfvars: {e}")))?;
         let version = self.hydrate(&Self::state_id(req), wd).await?;
-        self.run(wd, &["init", "-input=false", "-no-color"]).await?;
+        self.init(wd).await?;
         Ok(version)
+    }
+
+    /// `terraform init`, serialized across the process whenever a shared plugin
+    /// cache is configured. `TF_PLUGIN_CACHE_DIR` is not concurrency-safe: two ops
+    /// initializing at once race to write the same provider binary and one fails
+    /// with `text file busy` (ETXTBSY). The gate is held only here — applies and
+    /// destroys still run in parallel — and once a provider is cached, later inits
+    /// only symlink it, so the serialized window is just the first fetch.
+    async fn init(&self, wd: &Path) -> Result<(), ProvisionError> {
+        let _gate = match self.plugin_cache {
+            Some(_) => Some(self.init_gate.lock().await),
+            None => None,
+        };
+        self.run(wd, &["init", "-input=false", "-no-color"]).await?;
+        Ok(())
     }
 
     fn module_path(&self, config: &Value) -> Result<PathBuf, ProvisionError> {
@@ -1048,5 +1075,59 @@ mod tests {
         let mut src: &[u8] = b"hello";
         let out = read_capped(&mut src, 1024).await.unwrap();
         assert_eq!(out, b"hello");
+    }
+
+    /// Two ops provisioning different resources in one pipeline run `init`
+    /// concurrently against the *shared* `TF_PLUGIN_CACHE_DIR`. That cache is not
+    /// concurrency-safe — a real terraform writing the same provider binary twice
+    /// hits ETXTBSY. A fake terraform makes the race observable by taking an
+    /// exclusive lock inside the cache during `init`: if the connector lets the two
+    /// inits overlap, the second can't take the lock and records a collision.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn init_is_serialized_against_the_shared_plugin_cache() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root =
+            std::env::temp_dir().join(format!("frontkeep-tfinit-{}", frontkeep_storage::new_uid()));
+        let cache = root.join(".plugin-cache");
+        std::fs::create_dir_all(&cache).unwrap();
+
+        let bin = root.join("fake-terraform.sh");
+        std::fs::write(
+            &bin,
+            "#!/bin/sh\n\
+             for a in \"$@\"; do case \"$a\" in -*) ;; *) sub=\"$a\"; break ;; esac; done\n\
+             if [ \"$sub\" = init ]; then\n\
+             \x20 lock=\"$TF_PLUGIN_CACHE_DIR/.fk-init-lock\"\n\
+             \x20 if mkdir \"$lock\" 2>/dev/null; then sleep 0.3; rmdir \"$lock\"; \
+             else echo x >> \"$TF_PLUGIN_CACHE_DIR/.fk-collisions\"; exit 1; fi\n\
+             fi\n\
+             exit 0\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let conn = TerraformConnector::new(
+            bin.to_str().unwrap(),
+            PathBuf::from("/modules"),
+            root.clone(),
+        )
+        .with_plugin_cache(cache.clone());
+
+        let wd_a = root.join("a");
+        let wd_b = root.join("b");
+        std::fs::create_dir_all(&wd_a).unwrap();
+        std::fs::create_dir_all(&wd_b).unwrap();
+
+        let (ra, rb) = tokio::join!(conn.init(&wd_a), conn.init(&wd_b));
+        assert!(
+            ra.is_ok() && rb.is_ok(),
+            "both serialized inits succeed: {ra:?} {rb:?}"
+        );
+        assert!(
+            !cache.join(".fk-collisions").exists(),
+            "inits must not write the shared cache concurrently"
+        );
     }
 }
