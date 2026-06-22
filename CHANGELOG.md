@@ -1,3 +1,10 @@
+# [0.27.0](https://github.com/glemmestad/frontkeep/compare/v0.26.2...v0.27.0) (2026-06-22)
+
+
+### Features
+
+* **identity:** pin OIDC connection on authorize via FRONTKEEP_OIDC_CONNECTION ([#56](https://github.com/glemmestad/frontkeep/issues/56)) ([b373271](https://github.com/glemmestad/frontkeep/commit/b3732713117ff0093bd5eff74f7dea75c67dcb22))
+
 ## [0.26.2](https://github.com/glemmestad/frontkeep/compare/v0.26.1...v0.26.2) (2026-06-17)
 
 
