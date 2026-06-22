@@ -356,6 +356,7 @@ FRONTKEEP_OIDC_CLIENT_ID=...
 FRONTKEEP_OIDC_CLIENT_SECRET=...
 FRONTKEEP_OIDC_REDIRECT_URI=https://<host>/api/auth/oidc/callback
 # FRONTKEEP_OIDC_SCOPES defaults to "openid email profile"
+# FRONTKEEP_OIDC_CONNECTION=okta-workforce               # optional: pin the upstream connection
 ```
 
 > **`FRONTKEEP_OIDC_*` and `AUTH0_*` are two unrelated credential sets — don't
@@ -583,6 +584,7 @@ plaintext, or the audit log.
 | `FRONTKEEP_OIDC_DOMAIN` | IdP domain; presence enables SSO. Endpoints derived as `/authorize`, `/oauth/token`, `/userinfo`. | (off) |
 | `FRONTKEEP_OIDC_CLIENT_ID` / `_SECRET` / `_REDIRECT_URI` | OIDC web-app credentials + callback. | — |
 | `FRONTKEEP_OIDC_SCOPES` | Space-separated scopes. | `openid email profile` |
+| `FRONTKEEP_OIDC_CONNECTION` | Pins the upstream connection on `/authorize` (Auth0 `connection` param) so SSO skips the Universal Login picker and 302s straight to the IdP. Unset = hint-less request. | — |
 | `FRONTKEEP_ADMIN_EMAILS` | Comma-separated emails promoted to admin on every SSO login. Additive, promote-only (never demotes), never locks the UI. | — |
 | `FRONTKEEP_OIDC_ADMIN_GROUPS` / `_FINANCE_GROUPS` | Comma-separated group values → admin / finance. Setting either turns on **authoritative** group-claim sync (IdP owns OIDC roles incl. demotion; UI can't override). | — |
 | `FRONTKEEP_OIDC_GROUPS_CLAIM` | Userinfo claim the group values are read from. Auth0 custom claims are namespaced (e.g. `https://<host>/groups`). | `groups` |
