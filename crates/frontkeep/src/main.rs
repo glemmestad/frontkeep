@@ -3120,6 +3120,9 @@ fn build_oidc() -> Option<OidcConfig> {
         client_secret,
         redirect_uri,
         scopes,
+        connection: std::env::var("FRONTKEEP_OIDC_CONNECTION")
+            .ok()
+            .filter(|s| !s.is_empty()),
     })
 }
 

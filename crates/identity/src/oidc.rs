@@ -21,6 +21,10 @@ pub struct OidcConfig {
     pub client_secret: String,
     pub redirect_uri: String,
     pub scopes: Vec<String>,
+    /// Pins the upstream connection on `/authorize` (Auth0 `connection` param) so
+    /// SSO skips the Universal Login picker and goes straight to the IdP. `None`
+    /// omits the param entirely (hint-less request).
+    pub connection: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -65,7 +69,7 @@ impl UserInfo {
 
 impl OidcConfig {
     pub fn authorization_url(&self, state: &str, nonce: &str) -> String {
-        format!(
+        let mut url = format!(
             "{}?response_type=code&client_id={}&redirect_uri={}&scope={}&state={}&nonce={}",
             self.authorize_endpoint,
             enc(&self.client_id),
@@ -73,7 +77,11 @@ impl OidcConfig {
             enc(&self.scopes.join(" ")),
             enc(state),
             enc(nonce),
-        )
+        );
+        if let Some(c) = &self.connection {
+            url.push_str(&format!("&connection={}", enc(c)));
+        }
+        url
     }
 
     pub async fn exchange_code(&self, code: &str) -> Result<TokenResponse, OidcError> {
@@ -141,6 +149,7 @@ mod tests {
             client_secret: "shh".into(),
             redirect_uri: "https://frontkeep.example.com/auth/callback".into(),
             scopes: vec!["openid".into(), "email".into(), "profile".into()],
+            connection: None,
         }
     }
 
@@ -176,5 +185,15 @@ mod tests {
         assert!(url.contains("state=st8"));
         assert!(url.contains("scope=openid%20email%20profile"));
         assert!(url.contains("redirect_uri=https%3A%2F%2Ffrontkeep.example.com%2Fauth%2Fcallback"));
+        // hint-less by default: no connection pin
+        assert!(!url.contains("connection="));
+    }
+
+    #[test]
+    fn authorization_url_pins_connection_when_set() {
+        let mut c = cfg();
+        c.connection = Some("okta-workforce".into());
+        let url = c.authorization_url("st8", "nonce1");
+        assert!(url.contains("&connection=okta-workforce"));
     }
 }
