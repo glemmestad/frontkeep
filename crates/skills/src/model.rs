@@ -68,6 +68,40 @@ impl SkillFile {
     }
 }
 
+/// A file as submitted on publish. Contents come in as EITHER `content` (UTF-8
+/// text — what nearly every skill file is) OR `content_b64` (base64, for binary
+/// assets); exactly one. `into_file` normalizes both to the canonical stored
+/// [`SkillFile`] (always base64), so callers never hand-encode text and the read
+/// path is unchanged.
+#[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct SkillFileInput {
+    pub path: String,
+    /// UTF-8 text contents — use for SKILL.md, markdown, scripts, etc.
+    #[serde(default)]
+    pub content: Option<String>,
+    /// Base64-encoded bytes — use only for binary files.
+    #[serde(default)]
+    pub content_b64: Option<String>,
+}
+
+impl SkillFileInput {
+    pub fn into_file(self) -> Result<SkillFile, SkillError> {
+        match (self.content, self.content_b64) {
+            (Some(_), Some(_)) => Err(SkillError::Bundle(format!(
+                "file '{}' sets both content and content_b64; provide exactly one",
+                self.path
+            ))),
+            (Some(text), None) => Ok(SkillFile::from_text(self.path, &text)),
+            (None, Some(b64)) => Ok(SkillFile::from_bytes(self.path, &decode_b64(&b64)?)),
+            (None, None) => Err(SkillError::Bundle(format!(
+                "file '{}' sets neither content nor content_b64",
+                self.path
+            ))),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct SkillBundle {
