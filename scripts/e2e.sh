@@ -1077,6 +1077,26 @@ curl -s -o "$WORK/pskcat.out" -X POST "$BASE2/mcp" -H "authorization: Bearer $PA
 grep -q 'finn@corp.example' "$WORK/pskcat.out" && grep -q '\\"status\\":\\"community\\"' "$WORK/pskcat.out" \
   && ok "PAT skills_catalog_publish stamps the user as owner and lists it user-submitted" || { bad "PAT skill publish wrong"; cat "$WORK/pskcat.out"; }
 
+# 20g-ii. REST publish is the symmetric write path: a terminal `curl` uploads a bundle
+# from disk with the same user PAT (no browser session), and files may carry plain
+# `content` (UTF-8 text) instead of base64 — so the file bytes never pass through a
+# model's token stream. Same owner/community semantics as the MCP tool.
+python3 - <<'PY' > "$WORK/rskbody.json"
+import json
+md = "---\nname: REST Text Skill\ndescription: published over a PAT as plain text\n---\nDo the REST thing.\n"
+print(json.dumps({"name": "REST Text Skill", "bundle": [{"path": "SKILL.md", "content": md}]}))
+PY
+curl -s -o "$WORK/rskcat.json" -X POST "$BASE2/api/skills" -H "authorization: Bearer $PAT" \
+  -H 'content-type: application/json' -d @"$WORK/rskbody.json"
+grep -q 'finn@corp.example' "$WORK/rskcat.json" && grep -q '"status":"community"' "$WORK/rskcat.json" \
+  && ok "REST publish accepts a user PAT + plain-text content (bytes off the token stream)" || { bad "REST PAT/text publish wrong"; cat "$WORK/rskcat.json"; }
+
+# Same unauthenticated call is rejected — the open route still self-gates.
+RSKCODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE2/api/skills" \
+  -H 'content-type: application/json' -d @"$WORK/rskbody.json")
+[[ "$RSKCODE" == "401" ]] \
+  && ok "REST publish without a token is rejected (401)" || bad "REST publish unauth expected 401, got $RSKCODE"
+
 # 20h. The CLI binary is a PAT-authed MCP client — same token, same tools, parity
 # by construction — plus things the agent surface can't do (write seed files,
 # inference). Driven against the enforcing server with finn's real PAT. A scoped

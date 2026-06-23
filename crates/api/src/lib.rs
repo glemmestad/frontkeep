@@ -10,7 +10,7 @@ use axum::extract::{Path, Query, Request, State};
 use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::middleware::{from_fn_with_state, Next};
 use axum::response::{Html, IntoResponse, Response};
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use serde::Deserialize;
 use tower_http::trace::TraceLayer;
@@ -254,11 +254,8 @@ pub fn router(state: AppState) -> Router {
             post(unarchive_mcp_server),
         )
         .route("/api/mcp-servers/{id}/history", get(mcp_server_history))
-        .route("/api/skills", get(list_skills).post(create_skill))
-        .route(
-            "/api/skills/{id}",
-            get(get_skill).put(update_skill).delete(delete_skill),
-        )
+        .route("/api/skills", get(list_skills))
+        .route("/api/skills/{id}", get(get_skill).delete(delete_skill))
         .route("/api/skills/{id}/approve", post(approve_skill))
         .route("/api/skills/{id}/unapprove", post(unapprove_skill))
         .route("/api/skills/{id}/disable", post(disable_skill))
@@ -298,7 +295,12 @@ pub fn router(state: AppState) -> Router {
         // Skill install: a terminal `curl` reads these with a user PAT (no browser
         // session), so they live on the open router and self-gate via session-or-PAT.
         .route("/api/skills/{id}/raw/{*path}", get(skill_raw_file))
-        .route("/api/skills/{id}/install.sh", get(skill_install_sh));
+        .route("/api/skills/{id}/install.sh", get(skill_install_sh))
+        // Skill publish: the symmetric write path — a terminal `curl` uploads a bundle
+        // from disk with the same user PAT, so the file bytes never pass through a
+        // model's token stream. Self-gates via `current_user_or_pat`.
+        .route("/api/skills", post(create_skill))
+        .route("/api/skills/{id}", put(update_skill));
 
     // No CORS layer: the dashboard is served same-origin from this binary, and the
     // API/MCP consumers are not browsers. Cross-origin browser access is therefore
@@ -378,6 +380,30 @@ async fn current_user(
         return Ok(dev_admin_user());
     }
     Err(ApiError::Unauthorized("authentication required".into()))
+}
+
+/// Like [`current_user`], but also accepts a user PAT (`fk_pat_…`) — the same
+/// token used for MCP and the install endpoints. The publish endpoints use this so
+/// an agent can `curl` a skill in from disk (bytes never pass through a model's
+/// token stream) without a browser session.
+async fn current_user_or_pat(
+    st: &AppState,
+    headers: &HeaderMap,
+) -> Result<frontkeep_identity::User, ApiError> {
+    if let Some(token) = session_token(headers) {
+        if let Ok(user) = st.identity.validate_session(&token).await {
+            return Ok(user);
+        }
+        if let Ok(user) = st.identity.validate_pat(&token).await {
+            return Ok(user);
+        }
+    }
+    if st.dev_insecure {
+        return Ok(dev_admin_user());
+    }
+    Err(ApiError::Unauthorized(
+        "authentication required: present a session token or a user PAT (fk_pat_…)".into(),
+    ))
 }
 
 /// Resolve the acting user and require a capability, else 403.
@@ -1647,24 +1673,32 @@ struct SkillBody {
     version: String,
     #[serde(default)]
     tags: Vec<String>,
-    /// The skill's file tree: `[{ path, content_b64 }]`. `SKILL.md` is required.
+    /// The skill's file tree. Each file is `{ path, content }` for UTF-8 text
+    /// (SKILL.md, markdown, scripts) or `{ path, content_b64 }` for binary assets.
+    /// `SKILL.md` is required.
     #[serde(default)]
-    bundle: Vec<frontkeep_skills::SkillFile>,
+    bundle: Vec<frontkeep_skills::SkillFileInput>,
 }
 
-impl From<SkillBody> for frontkeep_registry::SkillInput {
-    fn from(b: SkillBody) -> Self {
-        frontkeep_registry::SkillInput {
-            name: b.name,
-            summary: b.summary,
-            readme: b.readme,
-            runtime: b.runtime,
-            repository: b.repository,
-            homepage: b.homepage,
-            version: b.version,
-            tags: b.tags,
-            bundle: frontkeep_skills::SkillBundle { files: b.bundle },
-        }
+impl SkillBody {
+    fn into_input(self) -> Result<frontkeep_registry::SkillInput, ApiError> {
+        let files = self
+            .bundle
+            .into_iter()
+            .map(|f| f.into_file())
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| ApiError::BadRequest(e.to_string()))?;
+        Ok(frontkeep_registry::SkillInput {
+            name: self.name,
+            summary: self.summary,
+            readme: self.readme,
+            runtime: self.runtime,
+            repository: self.repository,
+            homepage: self.homepage,
+            version: self.version,
+            tags: self.tags,
+            bundle: frontkeep_skills::SkillBundle { files },
+        })
     }
 }
 
@@ -1702,11 +1736,11 @@ async fn create_skill(
     headers: HeaderMap,
     Json(b): Json<SkillBody>,
 ) -> Result<Json<frontkeep_registry::Skill>, ApiError> {
-    let user = current_user(&st, &headers).await?;
+    let user = current_user_or_pat(&st, &headers).await?;
     let approved = user.can(frontkeep_identity::Capability::ManageUsers);
     let s = st
         .registry
-        .skill_create(&owner_id(&user), &b.into(), approved)
+        .skill_create(&owner_id(&user), &b.into_input()?, approved)
         .await?;
     Ok(Json(s))
 }
@@ -1728,7 +1762,7 @@ async fn update_skill(
     Path(id): Path<String>,
     Json(b): Json<SkillBody>,
 ) -> Result<Json<frontkeep_registry::Skill>, ApiError> {
-    let user = current_user(&st, &headers).await?;
+    let user = current_user_or_pat(&st, &headers).await?;
     let existing = st
         .registry
         .skill_get(&id)
@@ -1741,7 +1775,7 @@ async fn update_skill(
     }
     let s = st
         .registry
-        .skill_update(&id, &b.into(), &owner_id(&user))
+        .skill_update(&id, &b.into_input()?, &owner_id(&user))
         .await?
         .ok_or_else(|| ApiError::NotFound(format!("skill {id}")))?;
     Ok(Json(s))

@@ -232,8 +232,10 @@ pub struct SkillsCatalogPublishArgs {
     pub version: String,
     #[serde(default)]
     pub tags: Vec<String>,
-    /// The skill's file tree: `[{ path, content_b64 }]`. Must include a `SKILL.md`.
-    pub bundle: Vec<frontkeep_skills::SkillFile>,
+    /// The skill's file tree. Each file is `{ path, content }` for UTF-8 text
+    /// (SKILL.md, markdown, scripts) or `{ path, content_b64 }` for binary assets.
+    /// Must include a `SKILL.md`.
+    pub bundle: Vec<frontkeep_skills::SkillFileInput>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -1082,6 +1084,12 @@ impl FrontkeepMcp {
         a: SkillsCatalogPublishArgs,
     ) -> Result<String, String> {
         let admin = Role::parse(role).can(frontkeep_identity::Capability::ManageUsers);
+        let files = a
+            .bundle
+            .into_iter()
+            .map(|f| f.into_file())
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
         let input = SkillInput {
             name: a.name,
             summary: a.summary,
@@ -1091,7 +1099,7 @@ impl FrontkeepMcp {
             homepage: a.homepage,
             version: a.version,
             tags: a.tags,
-            bundle: frontkeep_skills::SkillBundle { files: a.bundle },
+            bundle: frontkeep_skills::SkillBundle { files },
         };
         let s = match a.id.filter(|s| !s.is_empty()) {
             Some(id) => {
@@ -2039,7 +2047,7 @@ impl FrontkeepMcp {
     }
 
     #[tool(
-        description = "Publish an agent skill to the catalog so others can discover and install it (or update one you own by passing its id). bundle is the skill's file tree [{ path, content_b64 }] and must include a SKILL.md; name/summary default to the SKILL.md frontmatter. Requires a user token (fk_pat_…) — a project key has no owner identity. Your submission is listed as user-submitted until an admin promotes it to company-approved."
+        description = "Publish an agent skill to the catalog so others can discover and install it (or update one you own by passing its id). bundle is the skill's file tree; each file is { path, content } for UTF-8 text (SKILL.md, markdown, scripts) or { path, content_b64 } for binary assets, and must include a SKILL.md; name/summary default to the SKILL.md frontmatter. For a large bundle, prefer publishing over the REST API (POST /api/skills with the same user token) so the file bytes are read from disk rather than emitted as tokens. Requires a user token (fk_pat_…) — a project key has no owner identity. Your submission is listed as user-submitted until an admin promotes it to company-approved."
     )]
     async fn skills_catalog_publish(
         &self,

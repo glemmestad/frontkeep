@@ -114,6 +114,20 @@ frontkeep -o json project ls | jq -r '.[].project_id'
   # install writes by default; --dry-run previews, --force overwrites
   ```
 
+  No CLI binary on hand (e.g. an agent driving only `/mcp`)? Publish over the REST
+  API with your user PAT — symmetric with the `install.sh` flow, and the file bytes
+  are read from disk rather than emitted through a model's token stream. Files take
+  plain `content` (UTF-8) or `content_b64` (binary); a small `jq` loop builds the
+  bundle from a folder:
+
+  ```bash
+  bundle=$(cd ./my-skill && find . -type f ! -name '.DS_Store' | sed 's|^\./||' \
+    | while read -r f; do jq -n --arg p "$f" --rawfile c "$f" '{path:$p, content:$c}'; done | jq -s .)
+  curl -fsS -H "Authorization: Bearer $FRONTKEEP_PAT" -H 'content-type: application/json' \
+    -d "$(jq -n --arg n my-skill --argjson b "$bundle" '{name:$n, bundle:$b}')" \
+    https://<host>/api/skills
+  ```
+
 - **Shell completions.**
 
   ```bash
