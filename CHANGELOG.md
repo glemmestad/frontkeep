@@ -1,3 +1,10 @@
+# [0.28.0](https://github.com/glemmestad/frontkeep/compare/v0.27.0...v0.28.0) (2026-06-23)
+
+
+### Features
+
+* **skills:** publish skills over REST with a PAT, accept plain-text files ([#57](https://github.com/glemmestad/frontkeep/issues/57)) ([5ac59af](https://github.com/glemmestad/frontkeep/commit/5ac59afc54834197f080f3864da95baa74b7763b))
+
 # [0.27.0](https://github.com/glemmestad/frontkeep/compare/v0.26.2...v0.27.0) (2026-06-22)
 
 
