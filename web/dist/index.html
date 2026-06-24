@@ -98,8 +98,8 @@
     .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
     input, select { background:var(--input); border:1px solid var(--line2); color:var(--fg);
       padding:8px 10px; border-radius:8px; font-family:inherit; font-size:13px; }
-    button.act { background:var(--teal); border:0; color:var(--on-teal); padding:8px 13px; border-radius:8px;
-      cursor:pointer; font-weight:700; font-family:inherit; }
+    .act { background:var(--teal); border:0; color:var(--on-teal); padding:8px 13px; border-radius:8px;
+      cursor:pointer; font-weight:700; font-family:inherit; display:inline-block; text-decoration:none; }
     button.danger { background:#2a1416; color:var(--red); border:1px solid #50272b; padding:5px 10px;
       border-radius:7px; cursor:pointer; font-size:12px; }
     .tablewrap { background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
@@ -587,6 +587,14 @@
     // Plain-English instruction you say to your connected agent (it maps it to the
     // right MCP tools) — deliberately not a tool-call/JSON snippet, which no human types.
     const say = (t) => `<div style="border-left:2px solid var(--teal);margin:6px 0;padding:3px 0 3px 12px;font-style:italic;font-size:13px;color:var(--fg)">“${esc(t)}”</div>`;
+    // Brand marks (simple-icons paths) so each agent's setup block is scannable at a
+    // glance instead of a wall of identical-looking text.
+    const BRAND = {
+      claude: '<svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor" aria-hidden="true"><path d="M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5528h3.7442L10.5363 3.5409Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z"/></svg>',
+      codex: '<svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor" aria-hidden="true"><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg>',
+      cursor: '<svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor" aria-hidden="true"><path d="M11.503.131 1.891 5.678a.84.84 0 0 0-.42.726v11.188c0 .3.162.575.42.724l9.609 5.55a1 1 0 0 0 .998 0l9.61-5.55a.84.84 0 0 0 .42-.724V6.404a.84.84 0 0 0-.42-.726L12.497.131a1.01 1.01 0 0 0-.996 0M2.657 6.338h18.55c.263 0 .43.287.297.515L12.23 22.918c-.062.107-.229.064-.229-.06V12.335a.59.59 0 0 0-.295-.51l-9.11-5.257c-.109-.063-.064-.23.061-.23"/></svg>',
+    };
+    const toolHead = (mark, name) => `<div class="row" style="align-items:center;gap:8px;margin-top:14px"><span style="display:inline-flex;color:var(--fg)">${mark}</span><span style="font-weight:700;font-size:13px">${name}</span></div>`;
     function wireCopy(root) {
       root.querySelectorAll('.cp').forEach(b => b.onclick = async () => {
         try { await navigator.clipboard.writeText(b.dataset.cp); const t = b.textContent; b.textContent = 'copied'; setTimeout(()=>b.textContent=t, 1200); }
@@ -598,23 +606,27 @@
       const base = location.origin + '/mcp';
       const minted = !!token;
       const pat = token || 'fk_pat_your_user_token';
-      const exportLine = `export FRONTKEEP_PAT=${pat}`;
-      // Claude Code bakes the header at add-time — the shell expands $FRONTKEEP_PAT
-      // right then, so an unset var silently stores an empty bearer and every call
-      // 401s. The expanded value lands in ~/.claude.json regardless, so the env-var
-      // indirection bought no secrecy here, only that footgun. Inline the token.
+      // The token is inlined into every snippet — no env vars to set, which is the
+      // single biggest source of "it 401s and I don't know why". Claude Code bakes
+      // the header at add-time anyway, Codex's bearer_token (v2.7.2+) and Cursor's
+      // header are read as literals; the indirection bought no secrecy, only footguns.
       const claude = `claude mcp add --transport http frontkeep ${base} \\\n  --header "Authorization: Bearer ${pat}"`;
-      // Codex resolves bearer_token_env_var at call time, so the token stays out of
-      // config.toml — keep the env-var form, but it must be set in Codex's environment.
-      const codex = `[mcp_servers.frontkeep]\nurl = "${base}"\nbearer_token_env_var = "FRONTKEEP_PAT"`;
-      const cursor = JSON.stringify({ mcpServers: { frontkeep: { url: base, headers: { Authorization: 'Bearer ${FRONTKEEP_PAT}' } } } }, null, 2);
+      const codex = `[mcp_servers.frontkeep]\nurl = "${base}"\nbearer_token = "${pat}"`;
+      const cursorCfg = { url: base, headers: { Authorization: `Bearer ${pat}` } };
+      const cursor = JSON.stringify({ mcpServers: { frontkeep: cursorCfg } }, null, 2);
+      // Cursor one-click install: name is its own param, config is base64 of the BARE
+      // server object ({url,headers}) — not the mcpServers wrapper, not name-keyed.
+      const cursorLink = `cursor://anysphere.cursor-deeplink/mcp/install?name=frontkeep&config=${encodeURIComponent(btoa(JSON.stringify(cursorCfg)))}`;
       const tokenBlock = minted
         ? `<div class="card" style="border-color:var(--teal);margin:10px 0 0">
             <p style="margin:0 0 6px;font-weight:700;color:var(--teal2)">✓ PAT created — shown once, copy it now</p>
             ${snip(token)}
-            <p class="muted" style="margin:10px 0 4px;font-size:12px">The Claude Code command below already has this token inline — copy and run it as-is. For Codex and Cursor, export it so they read it from your environment:</p>${snip(exportLine)}
-            <p class="muted" style="margin:10px 0 0;font-size:11px">Need another, or want to revoke this one? Manage your tokens on the <a href="#" id="gs-to-users">Users page</a>.</p></div>`
-        : `<div id="gs-token-out"></div><p class="muted" style="margin:8px 0 0;font-size:12px">Create the PAT and the snippets below fill in with your real token (and the export line for Codex/Cursor).</p>`;
+            <p class="muted" style="margin:10px 0 0;font-size:12px">It's already baked into every snippet below — just copy &amp; run, no environment variables to set. Lost it later? Mint another and revoke this one on the <a href="#" id="gs-to-users">Users page</a>.</p></div>`
+        : `<div id="gs-token-out"></div><p class="muted" style="margin:8px 0 0;font-size:12px">Create the PAT and the snippets below fill in with your real token, ready to copy &amp; run — no environment variables to set.</p>`;
+      const cursorInstall = minted
+        ? `<div class="row" style="margin:6px 0 0;align-items:center;gap:10px"><a class="act" href="${cursorLink}">Add to Cursor — one click</a><span class="muted" style="font-size:11px">opens Cursor and adds the server, token included</span></div>
+           <p class="muted" style="margin:10px 0 4px;font-size:12px">Prefer to do it by hand? Paste this into <code>~/.cursor/mcp.json</code> (every project) <em>or</em> <code>.cursor/mcp.json</code> at the root of one repo:</p>${snip(cursor)}`
+        : `<p class="muted" style="margin:4px 0 4px;font-size:12px">Once you've minted the PAT above, a one-click <strong>Add to Cursor</strong> button appears here. Manual route: paste into <code>~/.cursor/mcp.json</code> (every project) or <code>.cursor/mcp.json</code> at a repo root:</p>${snip(cursor)}`;
       return `<div class="step"><div class="n">1</div><div class="b">
         <h3>Create a Personal Access Token (PAT)</h3>
         <p class="muted" style="margin:0 0 6px;font-size:13px">The PAT is your key to ${SYS_NAME}'s MCP server — a long-lived <strong>user token</strong> tied to you. It lets your agent register projects and act on every project you own or manage; no per-project juggling.</p>
@@ -624,12 +636,12 @@
       </div></div>
       <div class="step"><div class="n">2</div><div class="b">
         <h3>Connect your agent over MCP</h3>
-        <p class="muted" style="margin:0 0 6px;font-size:13px">Add ${SYS_NAME}'s MCP server to your agent.</p>
-        <div class="muted" style="font-size:12px;margin-top:8px">Claude Code</div>${snip(claude)}
-        <p class="muted" style="margin:4px 0 0;font-size:11px">Prefer to keep the token out of <code>~/.claude.json</code>? Export it (above) and use <code>$FRONTKEEP_PAT</code> in the header instead — but make sure it's set in the shell you run this command in.</p>
-        <div class="muted" style="font-size:12px;margin-top:10px">Codex (<code>~/.codex/config.toml</code>)</div>${snip(codex)}
-        <p class="muted" style="margin:4px 0 0;font-size:11px">Codex reads <code>FRONTKEEP_PAT</code> from its environment at call time — it must be set wherever Codex runs, not just the shell where you edited the config.</p>
-        <div class="muted" style="font-size:12px;margin-top:10px">Cursor / generic Streamable-HTTP client (mcp.json)</div>${snip(cursor)}
+        <p class="muted" style="margin:0 0 6px;font-size:13px">Pick your agent and follow its block — the token is already filled in.</p>
+        ${toolHead(BRAND.claude, 'Claude Code')}${snip(claude)}
+        ${toolHead(BRAND.codex, 'Codex')}
+        <p class="muted" style="margin:4px 0 0;font-size:11px">Paste into <code>~/.codex/config.toml</code> (inline <code>bearer_token</code> needs Codex v2.7.2+).</p>${snip(codex)}
+        ${toolHead(BRAND.cursor, 'Cursor')}
+        ${cursorInstall}
         <p class="muted" style="margin:10px 0 0;font-size:12px">Once connected, <code>tools/list</code> shows <code>register_project</code>, <code>request_resource</code>, <code>seed_plan</code>, and the rest. Tell your agent: <em>"read the ${SYS_NAME} standards, register this project, then build."</em></p>
         <p class="muted" style="font-size:11px;margin-top:8px">Deploying an app or CI that lives in a single project? Register one below and mint a <strong>per-project key</strong> there instead — it's scoped to that one project.</p>
       </div></div>`;

@@ -62,26 +62,35 @@ available in the session.
 
 ### Codex
 
-Add to `~/.codex/config.toml` — `bearer_token_env_var` sources the PAT from your
-environment at call time, so the token never lands in the file:
+Add to `~/.codex/config.toml` with the token inline as `bearer_token` (needs
+Codex v2.7.2+); Codex sends it as `Authorization: Bearer <token>`:
 
 ```toml
 [mcp_servers.frontkeep]
 url = "https://<host>/mcp"
-bearer_token_env_var = "FRONTKEEP_PAT"
+bearer_token = "fk_pat_your_user_token"
 ```
+
+> Older Codex only reads the token from the environment: drop `bearer_token` and
+> use `bearer_token_env_var = "FRONTKEEP_PAT"` instead, with `FRONTKEEP_PAT`
+> exported wherever Codex runs.
 
 ### Cursor / generic Streamable-HTTP clients
 
-Add to your client's MCP config (e.g. Cursor's `~/.cursor/mcp.json` or a
-project `.cursor/mcp.json`):
+**One click:** the Getting-started page in the Frontkeep UI mints your PAT and
+renders an **Add to Cursor** button that opens Cursor and installs the server
+with the token already baked in — nothing to edit by hand.
+
+**By hand:** paste this into Cursor's MCP config — `~/.cursor/mcp.json` (applies
+to every project) or `.cursor/mcp.json` at the root of a single repo — with your
+real token inline:
 
 ```json
 {
   "mcpServers": {
     "frontkeep": {
       "url": "https://<host>/mcp",
-      "headers": { "Authorization": "Bearer ${FRONTKEEP_PAT}" }
+      "headers": { "Authorization": "Bearer fk_pat_your_user_token" }
     }
   }
 }
