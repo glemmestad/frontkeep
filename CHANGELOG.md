@@ -1,3 +1,10 @@
+# [0.29.0](https://github.com/glemmestad/frontkeep/compare/v0.28.0...v0.29.0) (2026-06-24)
+
+
+### Features
+
+* **ui:** inline PAT into Codex/Cursor MCP snippets + one-click Add to Cursor ([#58](https://github.com/glemmestad/frontkeep/issues/58)) ([eb94feb](https://github.com/glemmestad/frontkeep/commit/eb94febe6e243c072c743a5c846d18aa3dcf2a1a))
+
 # [0.28.0](https://github.com/glemmestad/frontkeep/compare/v0.27.0...v0.28.0) (2026-06-23)
 
 
