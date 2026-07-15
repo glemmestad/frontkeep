@@ -1,3 +1,10 @@
+## [0.29.1](https://github.com/glemmestad/frontkeep/compare/v0.29.0...v0.29.1) (2026-07-15)
+
+
+### Bug Fixes
+
+* **provision:** pass callback/web-origin/logout URLs through auth0-application module ([#59](https://github.com/glemmestad/frontkeep/issues/59)) ([3e3b667](https://github.com/glemmestad/frontkeep/commit/3e3b66762dc98b84b0b8082acfca3ea0fa4984ac))
+
 # [0.29.0](https://github.com/glemmestad/frontkeep/compare/v0.28.0...v0.29.0) (2026-06-24)
 
 
