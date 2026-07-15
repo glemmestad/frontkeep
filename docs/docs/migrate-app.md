@@ -230,10 +230,11 @@ request_resource auth0-application {
 "must run on a secure origin" error, because Step 7 gave it https) and a login
 round-trip returns to the app authenticated.
 
-> If the `auth0-application` module in your deployment does not yet expose
-> `callbacks`/`web_origins` inputs, add them to `modules/auth0/application` (they
-> map directly to `auth0_client` arguments) — this is the one module input the
-> migration adds.
+> `callbacks`/`web_origins`/`allowed_logout_urls` map directly to `auth0_client`
+> arguments and are managed by the control plane — re-applying with them set is
+> the supported way to repoint a client, replacing the old hand-edit-the-dashboard
+> workaround. A client whose URLs were set manually before this was wired must now
+> list them in its spec, or the next apply clears them (the control plane owns them).
 
 ## Step 9 — Data move `[HUMAN-GATED]`
 

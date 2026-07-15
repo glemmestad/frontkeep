@@ -22,6 +22,25 @@ variable "enabled_connections" {
   default = []
 }
 
+# OAuth redirect/CORS/logout URLs for the client. Optional list attributes on
+# auth0_client; empty (the default) keeps an OSS deploy unchanged. For a `spa`
+# these must be populated for a browser login round-trip to complete, which is
+# why the collab recipe passes them once the app's URL exists.
+variable "callbacks" {
+  type    = list(string)
+  default = []
+}
+
+variable "web_origins" {
+  type    = list(string)
+  default = []
+}
+
+variable "allowed_logout_urls" {
+  type    = list(string)
+  default = []
+}
+
 # When set, create a dedicated resource server (API) and use its identifier as
 # the application's audience. `{project}` is substituted with the project id so
 # each project gets a stable, unique audience. Empty = no API is created and the

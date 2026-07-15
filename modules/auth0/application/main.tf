@@ -26,6 +26,10 @@ resource "auth0_client" "app" {
   name     = local.qualified_name
   app_type = var.app_type
 
+  callbacks           = var.callbacks
+  web_origins         = var.web_origins
+  allowed_logout_urls = var.allowed_logout_urls
+
   # Auth0 client_metadata values must be strings; the tags map already is.
   client_metadata = var.tags
 }
