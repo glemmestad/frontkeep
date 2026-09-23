@@ -2044,6 +2044,20 @@
       // lost its worker (crash/OOM), so offer a manual unstick. The server only
       // reclaims if the claim is genuinely stale, so an early click is a safe no-op.
       const STRANDED_MS = 900_000;
+      const memberList = (members, decommissioned) => {
+        const rows = members.map(m => `<div class="row" style="justify-content:space-between;align-items:center;padding:6px 0">
+            <div>${esc(m.email)}<div class="muted" style="font-size:11px">added by ${esc(m.added_by)}</div></div>
+            ${decommissioned ? '' : `<button class="danger act" data-unmember="${esc(m.email)}">Remove</button>`}
+          </div>`).join('');
+        const list = members.length ? rows : `<div class="muted" style="font-size:13px">No members — only the owner and manager can act on this project.</div>`;
+        const add = decommissioned ? '' : `<div class="row" style="gap:8px;margin-top:12px">
+            <input id="mem-email" placeholder="colleague@example.com" style="flex:1;min-width:200px" />
+            <button class="act" id="mem-add">Add member</button>
+          </div>
+          <div id="mem-out" style="margin-top:6px"></div>`;
+        return list + add;
+      };
+
       const resourceTable = (resources) => {
         if (!resources.length) return empty('No resources provisioned.');
         const audit = canViewAudit();
@@ -2120,8 +2134,8 @@
 
       async function showDetail(id) {
         root().innerHTML = loading('Loading project…');
-        let p, resources = [], checklist = null, openReqs = [];
-        try { [p, resources, checklist, openReqs] = await Promise.all([api(`/api/projects/${enc(id)}`), api(`/api/projects/${enc(id)}/resources`), api(`/api/projects/${enc(id)}/promotion`).catch(() => null), api(`/api/requests?subject=${enc('project:'+id)}`).catch(() => [])]); }
+        let p, resources = [], checklist = null, openReqs = [], members = [];
+        try { [p, resources, checklist, openReqs, members] = await Promise.all([api(`/api/projects/${enc(id)}`), api(`/api/projects/${enc(id)}/resources`), api(`/api/projects/${enc(id)}/promotion`).catch(() => null), api(`/api/requests?subject=${enc('project:'+id)}`).catch(() => []), api(`/api/projects/${enc(id)}/members`).catch(() => [])]); }
         catch (e) { root().innerHTML = errBanner(e); return; }
         const flagged = (openReqs || []).find(r => r.kind === 'promotion' && r.state === 'flagged') || null;
         const reviewing = (openReqs || []).find(r => r.kind === 'promotion' && r.state === 'reviewing') || null;
@@ -2147,6 +2161,9 @@
               ${decommissioned ? '' : `<button class="act" id="id-edit" style="margin-left:auto">✎ Name / budget</button>`}
             </div>
           </div>
+          <h3 style="margin:18px 0 8px">Members</h3>
+          <p class="muted" style="font-size:12px;margin:0 0 10px">Collaborators who can provision, deploy images, read secrets and mint keys with their own token — without becoming owner or manager. They can't rename, re-budget, transfer, promote or decommission the project, and they don't approve its requests.</p>
+          <div class="card" id="p-members">${memberList(members, decommissioned)}</div>
           <div class="row" style="justify-content:space-between;align-items:center;margin:18px 0 8px">
             <h3 style="margin:0">Governance evidence</h3>
             ${decommissioned ? '' : `<button class="act" id="ev-edit">Edit evidence</button>`}
@@ -2168,6 +2185,21 @@
         root().querySelector('.crumb').onclick = () => showList();
         root().querySelectorAll('.pbtn').forEach(b => b.onclick = () => doAction(id, b.dataset.kind));
         wireResources(id);
+        const memAdd = root().querySelector('#mem-add');
+        if (memAdd) memAdd.onclick = async () => {
+          const email = document.getElementById('mem-email').value.trim();
+          const out = document.getElementById('mem-out'); out.innerHTML = '';
+          if (!email) { out.innerHTML = `<span class="err">Enter an email address.</span>`; return; }
+          try { await api(`/api/projects/${enc(id)}/members`, {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({email})}); showDetail(id); }
+          catch (e) { out.innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+        };
+        root().querySelectorAll('[data-unmember]').forEach(b => b.onclick = async () => {
+          const email = b.dataset.unmember;
+          const ok = await confirmAction({ title: 'Remove member', message: `${email} will lose access to this project's resources, secrets and keys. Anything they already provisioned keeps running.`, confirmLabel: 'Remove' });
+          if (!ok) return;
+          try { await api(`/api/projects/${enc(id)}/members/${enc(email)}`, {method:'DELETE'}); showDetail(id); }
+          catch (e) { document.getElementById('mem-out').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+        });
         const reviewRefresh = root().querySelector('#review-refresh');
         if (reviewRefresh) reviewRefresh.onclick = () => showDetail(id);
         const idEdit = root().querySelector('#id-edit');

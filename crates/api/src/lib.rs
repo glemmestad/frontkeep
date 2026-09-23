@@ -160,6 +160,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/projects", get(list_projects).post(register_project))
         .route("/api/projects/{id}", get(get_project).patch(update_project))
         .route("/api/projects/{id}/keys", post(mint_key))
+        .route(
+            "/api/projects/{id}/members",
+            get(list_members).post(add_member),
+        )
+        .route("/api/projects/{id}/members/{email}", delete(remove_member))
         .route("/api/projects/{id}/kill", post(kill_project))
         .route("/api/projects/{id}/unkill", post(unkill_project))
         .route(
@@ -423,10 +428,10 @@ async fn require_cap(
     }
 }
 
-/// Resolve the acting user and require they have authority over a *specific*
-/// project — its owner or manager, or an admin/finance see-all role. The same
-/// relationship rule used for cost/project *visibility*, now enforced on
-/// mutations so a signed-in user can't act on a project by id alone. 403 otherwise.
+/// Resolve the acting user and require they may *operate* a specific project —
+/// its owner, manager, or a listed member, or an admin/finance see-all role. The
+/// same relationship rule used for cost/project *visibility*, enforced on the
+/// resource surface so a signed-in user can't act on a project by id alone.
 async fn require_project_authority(
     st: &AppState,
     headers: &HeaderMap,
@@ -443,7 +448,28 @@ async fn require_project_authority(
         Ok(user)
     } else {
         Err(ApiError::Forbidden(format!(
-            "not authorized for project {project_id} (you must own or manage it)"
+            "not authorized for project {project_id} (you must own, manage, or be a member of it)"
+        )))
+    }
+}
+
+/// The stricter gate: the project *record* — its name/budget, its lifecycle, its
+/// ownership and its membership — belongs to the owner/manager (or an admin).
+/// Members operate the project's resources but never re-shape the project or
+/// grant themselves company, so those routes take this instead.
+async fn require_project_steward(
+    st: &AppState,
+    headers: &HeaderMap,
+    project_id: &str,
+) -> Result<frontkeep_identity::User, ApiError> {
+    let user = current_user(st, headers).await?;
+    let see_all = scope_for(&user).is_none();
+    let email = user.email.clone().unwrap_or_default();
+    if st.registry.is_steward(project_id, &email, see_all).await? {
+        Ok(user)
+    } else {
+        Err(ApiError::Forbidden(format!(
+            "not authorized for project {project_id} (its owner or manager only)"
         )))
     }
 }
@@ -641,15 +667,20 @@ struct MintBody {
     name: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct MemberBody {
+    email: String,
+}
+
 async fn mint_key(
     State(st): State<AppState>,
     Path(project_id): Path<String>,
     headers: HeaderMap,
     Json(body): Json<MintBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    // Only an authority over this project (owner/manager, or admin/finance) may
-    // mint its key. Gate: the project must also be registered + active. Budget and
-    // data class come from the registration record, not the mint request.
+    // Only an authority over this project (owner/manager/member, or admin/finance)
+    // may mint its key. Gate: the project must also be registered + active. Budget
+    // and data class come from the registration record, not the mint request.
     require_project_authority(&st, &headers, &project_id).await?;
     st.registry.require_active(&project_id).await?;
     let minted = st
@@ -664,6 +695,47 @@ async fn mint_key(
     })))
 }
 
+async fn list_members(
+    State(st): State<AppState>,
+    Path(project_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<frontkeep_registry::ProjectMember>>, ApiError> {
+    require_project_authority(&st, &headers, &project_id).await?;
+    Ok(Json(st.registry.list_members(&project_id).await?))
+}
+
+async fn add_member(
+    State(st): State<AppState>,
+    Path(project_id): Path<String>,
+    headers: HeaderMap,
+    Json(b): Json<MemberBody>,
+) -> Result<Json<frontkeep_registry::ProjectMember>, ApiError> {
+    let user = require_project_steward(&st, &headers, &project_id).await?;
+    Ok(Json(
+        st.registry
+            .add_member(&project_id, &b.email, &actor_for(&user))
+            .await?,
+    ))
+}
+
+async fn remove_member(
+    State(st): State<AppState>,
+    Path((project_id, email)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let user = require_project_steward(&st, &headers, &project_id).await?;
+    let removed = st
+        .registry
+        .remove_member(&project_id, &email, &actor_for(&user))
+        .await?;
+    if !removed {
+        return Err(ApiError::NotFound(format!(
+            "{email} is not a member of {project_id}"
+        )));
+    }
+    Ok(Json(serde_json::json!({ "removed": email })))
+}
+
 async fn kill_project(
     State(st): State<AppState>,
     Path(project_id): Path<String>,
@@ -672,7 +744,7 @@ async fn kill_project(
     // Only an authority over this project may flip its kill switch. Same gate as
     // minting/provisioning: it only applies to a registered, active project (a
     // phantom id must 404, not silently "succeed").
-    require_project_authority(&st, &headers, &project_id).await?;
+    require_project_steward(&st, &headers, &project_id).await?;
     st.registry.require_active(&project_id).await?;
     // Block the LLM key first (instant), then suspend billable resources.
     st.gateway.repo().set_killed(&project_id, true).await?;
@@ -699,7 +771,7 @@ async fn unkill_project(
     Path(project_id): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    require_project_authority(&st, &headers, &project_id).await?;
+    require_project_steward(&st, &headers, &project_id).await?;
     st.registry.require_active(&project_id).await?;
     st.gateway.repo().set_killed(&project_id, false).await?;
     let summary = st.provision.resume_project(&project_id).await?;
@@ -745,13 +817,9 @@ async fn list_projects(
     headers: HeaderMap,
 ) -> Result<Json<Vec<frontkeep_registry::Registration>>, ApiError> {
     let scope = scope_for(&current_user(&st, &headers).await?);
-    let mut projects = st.registry.list().await?;
     // Same relationship rule as cost: a scoped caller sees only the projects they
-    // own or manage; Admin/Finance (scope None) see all.
-    if let Some(email) = scope {
-        projects.retain(|p| p.owner == email || p.manager == email);
-    }
-    Ok(Json(projects))
+    // own, manage, or are a member of; Admin/Finance (scope None) see all.
+    Ok(Json(st.registry.list_scoped(scope.as_deref()).await?))
 }
 
 async fn get_project(
@@ -783,7 +851,7 @@ async fn update_project(
     headers: HeaderMap,
     Json(b): Json<UpdateProjectBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let user = require_project_authority(&st, &headers, &project_id).await?;
+    let user = require_project_steward(&st, &headers, &project_id).await?;
     let email = user.email.unwrap_or_default();
     let actor = format!("user:default/{}", email.split('@').next().unwrap_or("api"));
     // Evidence is PUT, but only when supplied — a name/budget-only edit keeps it.
@@ -839,7 +907,7 @@ async fn decommission_project(
     headers: HeaderMap,
     Json(b): Json<DecommissionBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    require_project_authority(&st, &headers, &project_id).await?;
+    require_project_steward(&st, &headers, &project_id).await?;
     let reason = b
         .reason
         .unwrap_or_else(|| "decommissioned via api".to_string());
@@ -877,7 +945,7 @@ async fn request_promotion(
     headers: HeaderMap,
     Json(b): Json<PromotionBody>,
 ) -> Result<Json<frontkeep_workflow::WorkflowRequest>, ApiError> {
-    let user = require_project_authority(&st, &headers, &project_id).await?;
+    let user = require_project_steward(&st, &headers, &project_id).await?;
     let email = user.email.unwrap_or_default();
     let actor = format!("user:default/{}", email.split('@').next().unwrap_or("api"));
     Ok(Json(
@@ -900,7 +968,7 @@ async fn demote_project(
     headers: HeaderMap,
     Json(b): Json<DemoteBody>,
 ) -> Result<Json<frontkeep_registry::Registration>, ApiError> {
-    let user = require_project_authority(&st, &headers, &project_id).await?;
+    let user = require_project_steward(&st, &headers, &project_id).await?;
     let email = user.email.unwrap_or_default();
     let actor = format!("user:default/{}", email.split('@').next().unwrap_or("api"));
     let reason = b.reason.unwrap_or_default();
@@ -916,7 +984,7 @@ async fn extend_review(
     Path(project_id): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<frontkeep_registry::ExtendOutcome>, ApiError> {
-    let user = require_project_authority(&st, &headers, &project_id).await?;
+    let user = require_project_steward(&st, &headers, &project_id).await?;
     let email = user.email.unwrap_or_default();
     let actor = format!("user:default/{}", email.split('@').next().unwrap_or("api"));
     Ok(Json(
@@ -2608,7 +2676,7 @@ async fn escalate_request(
         .ok_or_else(|| ApiError::NotFound(format!("request {id}")))?;
     let actor = match req.subject.strip_prefix("project:") {
         Some(pid) => {
-            let user = require_project_authority(&st, &headers, pid).await?;
+            let user = require_project_steward(&st, &headers, pid).await?;
             actor_for(&user)
         }
         None => {
@@ -2638,7 +2706,7 @@ async fn request_reviews(
         .ok_or_else(|| ApiError::NotFound(format!("request {id}")))?;
     match req.subject.strip_prefix("project:") {
         Some(pid) => {
-            require_project_authority(&st, &headers, pid).await?;
+            require_project_steward(&st, &headers, pid).await?;
         }
         None => {
             require_cap(

@@ -312,6 +312,20 @@ enum ProjectCmd {
         #[arg(long)]
         budget_usd: Option<f64>,
     },
+    /// List a project's members (collaborators).
+    Members { project_id: String },
+    /// Add a collaborator: full resource authority, no stewardship.
+    AddMember {
+        project_id: String,
+        #[arg(long)]
+        email: String,
+    },
+    /// Remove a collaborator, revoking their access to the project's resources.
+    RemoveMember {
+        project_id: String,
+        #[arg(long)]
+        email: String,
+    },
     /// Show what registration/promotion requires per classification tier.
     Requirements {
         #[arg(long)]
@@ -1242,6 +1256,27 @@ async fn main() -> anyhow::Result<()> {
                     opt(&mut m, "description", description);
                     opt(&mut m, "budget_usd", budget_usd);
                     run_tool(&r, "update_project", m, Shape::Auto).await;
+                }
+                ProjectCmd::Members { project_id } => {
+                    run_tool(
+                        &r,
+                        "list_members",
+                        one("project_id", project_id),
+                        Shape::Auto,
+                    )
+                    .await
+                }
+                ProjectCmd::AddMember { project_id, email } => {
+                    let mut m = Map::new();
+                    m.insert("project_id".into(), json!(project_id));
+                    m.insert("email".into(), json!(email));
+                    run_tool(&r, "add_member", m, Shape::Auto).await;
+                }
+                ProjectCmd::RemoveMember { project_id, email } => {
+                    let mut m = Map::new();
+                    m.insert("project_id".into(), json!(project_id));
+                    m.insert("email".into(), json!(email));
+                    run_tool(&r, "remove_member", m, Shape::Auto).await;
                 }
                 ProjectCmd::Requirements { classification } => {
                     let mut m = Map::new();

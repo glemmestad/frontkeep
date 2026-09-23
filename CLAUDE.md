@@ -118,10 +118,19 @@ FRONTKEEP_DEV_INSECURE=1 FRONTKEEP_DATABASE_URL="sqlite:///tmp/frontkeep.db" \
   `databricks-billing` over `system.billing.usage`) are registered plugins keyed by
   `cost.source.type`, driven by the daily rollup loop + `POST /api/cost/rollup`.
 - **RBAC model:** roles are org-wide (admin/finance/member). Authority over a
-  *specific* project (see its cost, it shows in your list) is **automatic from
-  the owner/manager relationship**, not a role — cost + projects reads are scoped
-  to `owner == me OR manager == me` unless the caller has `ViewAllCost`
-  (admin/finance). See `scope_for` in `crates/api/src/lib.rs`.
+  *specific* project is a **relationship, not a role**, and it has two tiers, both
+  in `crates/registry/src/lib.rs`:
+  - `is_steward` = owner ∪ manager — owns the project *record*: rename, re-budget,
+    transfer, promote/demote, kill/decommission, and membership. Approvals stay
+    manager-only (`may_approve_request`).
+  - `is_authority` = steward ∪ `project_members` — may *operate* the project:
+    provision, deploy, secrets, gateway keys. This is also the visibility rule, so
+    cost + projects reads scope to it unless the caller has `ViewAllCost`
+    (admin/finance). See `scope_for` / `require_project_steward` in
+    `crates/api/src/lib.rs`, `resolve_project_steward` in `crates/mcp/src/lib.rs`.
+  Owner/manager are denormalized onto `usage_events` / `cost_rollup`; membership is
+  mutable so it can't be — the cost queries join `project_members` (one `SCOPE_SQL`
+  const per crate).
 - **Cost has two paths:** model spend (`usage_events`, via `registry::cost`) and
   infra (`cost_rollup`, via `provision::cost`). Both denormalize owner/manager, so
   scoping is a plain predicate. `POST /api/cost/rollup` recomputes (CE itself lags ~24h).

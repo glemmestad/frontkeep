@@ -42,6 +42,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (26, include_str!("../migrations/0026_skills.sql")),
     (27, include_str!("../migrations/0027_provision_retry.sql")),
     (28, include_str!("../migrations/0028_provision_runs.sql")),
+    (29, include_str!("../migrations/0029_project_members.sql")),
 ];
 
 pub async fn run(db: &Db) -> Result<(), StorageError> {

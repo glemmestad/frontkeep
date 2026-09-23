@@ -207,8 +207,13 @@ a provider SDK directly.
 - **`404` on `/mcp`** — wrong path; it's exactly `/mcp` on the Frontkeep host.
 - **"project_id is required for a user token"** — a user token isn't scoped to one
   project, so project-scoped tools need you to name which one.
-- **"not authorized for project …"** — you named a project you don't own or
-  manage. Register it (you become the owner) or ask its owner/manager.
+- **"not authorized for project …"** — you named a project you don't own, manage
+  or belong to. Register it (you become the owner), or ask its owner/manager to
+  `add_member` you — a member provisions, deploys and reads secrets on the project
+  with their own token.
+- **"not authorized for project … (its owner or manager only)"** — you're a member,
+  and that tool re-shapes the project itself (rename, re-budget, transfer, promote).
+  Those stay with the owner/manager.
 - **"cross-project access denied"** — on a project key, you passed a `project_id`
   that isn't the key's project. Drop the argument; the key's project is used.
 - **Looking for `gateway_chat`?** It's gone from MCP by design — use the gateway

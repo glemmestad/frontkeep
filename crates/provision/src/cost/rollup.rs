@@ -10,6 +10,12 @@ use sqlx::Row;
 
 use crate::ProvisionError;
 
+/// The relationship-scope predicate: owner/manager off the denormalized columns,
+/// plus membership, which is mutable and so has to join `project_members` at read
+/// time. Takes three binds of the same caller email.
+const SCOPE_SQL: &str = " AND (owner = ? OR manager = ? OR project_id IN \
+     (SELECT project_id FROM project_members WHERE email = ?))";
+
 /// One day's cost for a `(project, service, source)`. `actual_usd` is the day's
 /// delta (NULL = unmeasured); `cumulative_usd` is the month-to-date figure the
 /// source reported, kept alongside so deltas are debuggable.
@@ -128,8 +134,8 @@ pub struct ProjectFact {
 #[derive(Clone)]
 pub struct CostRollupRepo {
     db: Db,
-    /// When set, every read is restricted to projects this email owns or manages
-    /// (relationship scope). `None` = unrestricted (Admin/Finance).
+    /// When set, every read is restricted to projects this email owns, manages,
+    /// or is a member of (relationship scope). `None` = unrestricted (Admin/Finance).
     scope_email: Option<String>,
 }
 
@@ -141,10 +147,10 @@ impl CostRollupRepo {
         }
     }
 
-    /// A view of this repo restricted to one email's owned/managed projects.
-    /// `None` returns an unrestricted view. The relationship columns (owner,
-    /// manager) are denormalized onto every rollup row, so the filter is a plain
-    /// predicate — no join.
+    /// A view of this repo restricted to one email's projects. `None` returns an
+    /// unrestricted view. Owner/manager are denormalized onto every rollup row so
+    /// they stay a plain predicate; membership is mutable and joins through
+    /// `project_members` (see `SCOPE_SQL`).
     pub fn scoped(&self, email: Option<String>) -> Self {
         CostRollupRepo {
             db: self.db.clone(),
@@ -213,7 +219,7 @@ impl CostRollupRepo {
         to_day: &str,
     ) -> Result<Vec<RollupRow>, ProvisionError> {
         let scope_sql = if self.scope_email.is_some() {
-            " AND (owner = ? OR manager = ?)"
+            SCOPE_SQL
         } else {
             ""
         };
@@ -228,7 +234,10 @@ impl CostRollupRepo {
             .bind(from_day)
             .bind(to_day);
         if let Some(email) = &self.scope_email {
-            q = q.bind(email.clone()).bind(email.clone());
+            q = q
+                .bind(email.clone())
+                .bind(email.clone())
+                .bind(email.clone());
         }
         let rows = q.fetch_all(self.db.pool()).await?;
         Ok(rows.into_iter().map(row_to_rollup).collect())
@@ -245,7 +254,7 @@ impl CostRollupRepo {
         let col = dim.column();
         let key_expr = format!("COALESCE(NULLIF({col}, ''), 'unknown')");
         let scope_sql = if self.scope_email.is_some() {
-            " AND (owner = ? OR manager = ?)"
+            SCOPE_SQL
         } else {
             ""
         };
@@ -257,7 +266,10 @@ impl CostRollupRepo {
         let qsql = self.db.q(&sql);
         let mut q = sqlx::query(&qsql).bind(from_day).bind(until_day);
         if let Some(email) = &self.scope_email {
-            q = q.bind(email.clone()).bind(email.clone());
+            q = q
+                .bind(email.clone())
+                .bind(email.clone())
+                .bind(email.clone());
         }
         let rows = q.fetch_all(self.db.pool()).await?;
         Ok(rows
@@ -278,7 +290,7 @@ impl CostRollupRepo {
         until_day: &str,
     ) -> Result<Vec<ProjectFact>, ProvisionError> {
         let scope_sql = if self.scope_email.is_some() {
-            " AND (owner = ? OR manager = ?)"
+            SCOPE_SQL
         } else {
             ""
         };
@@ -292,7 +304,10 @@ impl CostRollupRepo {
         let qsql = self.db.q(&sql);
         let mut q = sqlx::query(&qsql).bind(from_day).bind(until_day);
         if let Some(email) = &self.scope_email {
-            q = q.bind(email.clone()).bind(email.clone());
+            q = q
+                .bind(email.clone())
+                .bind(email.clone())
+                .bind(email.clone());
         }
         let rows = q.fetch_all(self.db.pool()).await?;
         Ok(rows
@@ -386,11 +401,13 @@ impl CostRollupRepo {
             sql.push_str(" AND project_id = ?");
         }
         // cost_anomaly carries no relationship columns, so scope via the projects
-        // this email owns/manages in the rollup table.
+        // this email owns/manages in the rollup table, plus the ones they're a
+        // member of.
         if self.scope_email.is_some() {
             sql.push_str(
-                " AND project_id IN (SELECT DISTINCT project_id FROM cost_rollup \
-                 WHERE owner = ? OR manager = ?)",
+                " AND (project_id IN (SELECT DISTINCT project_id FROM cost_rollup \
+                 WHERE owner = ? OR manager = ?) \
+                 OR project_id IN (SELECT project_id FROM project_members WHERE email = ?))",
             );
         }
         sql.push_str(" ORDER BY day DESC, created_at DESC LIMIT ?");
@@ -400,7 +417,10 @@ impl CostRollupRepo {
             q = q.bind(p.to_string());
         }
         if let Some(email) = &self.scope_email {
-            q = q.bind(email.clone()).bind(email.clone());
+            q = q
+                .bind(email.clone())
+                .bind(email.clone())
+                .bind(email.clone());
         }
         let rows = q.bind(limit).fetch_all(self.db.pool()).await?;
         Ok(rows
@@ -515,6 +535,70 @@ mod tests {
             .await
             .unwrap();
         assert!(none.is_none(), "nothing before the first day");
+    }
+
+    #[tokio::test]
+    async fn scoped_reads_follow_membership_as_well_as_owner_manager() {
+        let r = repo().await;
+        r.upsert_daily(&row("p1", "2026-06-10", "gateway", 2.0, 2.0))
+            .await
+            .unwrap();
+        let taha = "taha@x".to_string();
+        let scoped = r.scoped(Some(taha.clone()));
+        assert!(scoped
+            .series("p1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(scoped
+            .project_facts("2026-06-01", "2026-06-30")
+            .await
+            .unwrap()
+            .is_empty());
+
+        sqlx::query(&r.db.q(
+            "INSERT INTO project_members (project_id, email, added_by, created_at) \
+             VALUES (?, ?, ?, ?)",
+        ))
+        .bind("p1")
+        .bind(&taha)
+        .bind("user:o@x")
+        .bind(frontkeep_storage::now())
+        .execute(r.db.pool())
+        .await
+        .unwrap();
+
+        assert_eq!(
+            scoped
+                .series("p1", "2026-06-01", "2026-06-30")
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            scoped
+                .project_facts("2026-06-01", "2026-06-30")
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            scoped
+                .by_dimension(RollupDim::Project, "2026-06-01", "2026-06-30")
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        // A stranger still sees nothing.
+        assert!(r
+            .scoped(Some("nobody@x".into()))
+            .series("p1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]
