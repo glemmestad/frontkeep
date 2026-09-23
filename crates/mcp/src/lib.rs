@@ -144,6 +144,13 @@ pub struct UpdateProjectArgs {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct MemberArgs {
+    pub project_id: Option<String>,
+    /// The collaborator's email address.
+    pub email: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct IdArg {
     pub id: String,
 }
@@ -532,7 +539,7 @@ impl FrontkeepMcp {
     /// - **Project key** — locked to that key's project (a differing `project_id`
     ///   argument is denied).
     /// - **User PAT** — `project_id` is required and authorized via the shared
-    ///   ownership predicate (owner/manager, or admin/finance see-all).
+    ///   relationship predicate (owner/manager/member, or admin/finance see-all).
     /// - **None (stdio)** — falls back to the argument or `default_project`.
     async fn resolve_project(
         &self,
@@ -560,13 +567,42 @@ impl FrontkeepMcp {
         }
     }
 
-    /// Authorize a user principal for a project (owner/manager, or see-all role).
+    /// Resolve a project for a tool that re-shapes the project record itself
+    /// (ownership, membership, lifecycle). Same as `resolve_project` but a member
+    /// principal is refused — that surface is the owner/manager's.
+    async fn resolve_project_steward(
+        &self,
+        ctx: &RequestContext<RoleServer>,
+        arg: Option<String>,
+    ) -> Result<String, String> {
+        let pid = self.resolve_project(ctx, arg).await?;
+        if let Some(McpAuth::User { email, role }) = Self::auth(ctx) {
+            self.authorize_steward(&email, &role, &pid).await?;
+        }
+        Ok(pid)
+    }
+
+    /// The steward half of `authorize_user`: a member is refused. A project key
+    /// principal is not subject to this — it *is* the project.
+    async fn authorize_steward(&self, email: &str, role: &str, pid: &str) -> Result<(), String> {
+        let see_all = Role::parse(role).can(frontkeep_identity::Capability::ViewAllCost);
+        match self.registry.is_steward(pid, email, see_all).await {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(format!(
+                "not authorized for project {pid} (its owner or manager only)"
+            )),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    /// Authorize a user principal to operate a project (owner/manager/member, or
+    /// see-all role).
     async fn authorize_user(&self, email: &str, role: &str, pid: &str) -> Result<(), String> {
         let see_all = Role::parse(role).can(frontkeep_identity::Capability::ViewAllCost);
         match self.registry.is_authority(pid, email, see_all).await {
             Ok(true) => Ok(()),
             Ok(false) => Err(format!(
-                "not authorized for project {pid} (you must own or manage it)"
+                "not authorized for project {pid} (you must own, manage, or be a member of it)"
             )),
             Err(e) => Err(e.to_string()),
         }
@@ -744,16 +780,20 @@ impl FrontkeepMcp {
     }
 
     async fn do_list_projects(&self, auth: Option<McpAuth>) -> Result<String, String> {
-        let mut projects = self.registry.list().await.map_err(|e| e.to_string())?;
+        let mut projects = match &auth {
+            Some(McpAuth::User { email, role })
+                if !Role::parse(role).can(frontkeep_identity::Capability::ViewAllCost) =>
+            {
+                self.registry.list_scoped(Some(email)).await
+            }
+            _ => self.registry.list().await,
+        }
+        .map_err(|e| e.to_string())?;
         match auth {
             Some(McpAuth::Project { project_id }) => {
                 projects.retain(|p| p.project_id == project_id)
             }
-            Some(McpAuth::User { email, role }) => {
-                if !Role::parse(&role).can(frontkeep_identity::Capability::ViewAllCost) {
-                    projects.retain(|p| p.owner == email || p.manager == email);
-                }
-            }
+            Some(McpAuth::User { .. }) => {}
             None => {
                 if let Some(dp) = &self.default_project {
                     projects.retain(|p| &p.project_id == dp);
@@ -1501,11 +1541,13 @@ impl FrontkeepMcp {
             Some(McpAuth::User { email, role }) => {
                 let see_all = Role::parse(&role).can(frontkeep_identity::Capability::ViewAllCost);
                 if !see_all {
-                    let projects = self.registry.list().await.map_err(|e| e.to_string())?;
-                    let mine: std::collections::HashSet<String> = projects
-                        .iter()
-                        .filter(|p| p.owner == email || p.manager == email)
-                        .map(|p| p.project_id.clone())
+                    let mine: std::collections::HashSet<String> = self
+                        .registry
+                        .list_scoped(Some(&email))
+                        .await
+                        .map_err(|e| e.to_string())?
+                        .into_iter()
+                        .map(|p| p.project_id)
                         .collect();
                     reqs.retain(|r| r.project_id().is_some_and(|p| mine.contains(p)));
                 }
@@ -1827,7 +1869,10 @@ impl FrontkeepMcp {
         ctx: RequestContext<RoleServer>,
         Parameters(a): Parameters<UpdateProjectArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let pid = match self.resolve_project(&ctx, a.project_id.clone()).await {
+        let pid = match self
+            .resolve_project_steward(&ctx, a.project_id.clone())
+            .await
+        {
             Ok(p) => p,
             Err(e) => return deny(e),
         };
@@ -1852,6 +1897,80 @@ impl FrontkeepMcp {
             Err(e) => return deny(e),
         };
         wrap(self.do_project_get(&pid).await)
+    }
+
+    #[tool(
+        description = "List a project's members — collaborators who may provision, deploy, read secrets and mint keys for it, without holding the owner/manager slot."
+    )]
+    async fn list_members(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(a): Parameters<ProjectArg>,
+    ) -> Result<CallToolResult, McpError> {
+        let pid = match self.resolve_project(&ctx, a.project_id).await {
+            Ok(p) => p,
+            Err(e) => return deny(e),
+        };
+        wrap(
+            self.registry
+                .list_members(&pid)
+                .await
+                .map(|m| serde_json::to_string(&m).unwrap_or_default())
+                .map_err(|e| e.to_string()),
+        )
+    }
+
+    #[tool(
+        description = "Add a collaborator to a project. They get the same resource surface as the owner — provision, deploy_image, secrets, gateway keys — using their own user token, but cannot re-shape the project (rename, re-budget, transfer, promote) or approve its requests. Requires a project you own/manage."
+    )]
+    async fn add_member(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(a): Parameters<MemberArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let pid = match self.resolve_project_steward(&ctx, a.project_id).await {
+            Ok(p) => p,
+            Err(e) => return deny(e),
+        };
+        wrap(
+            self.registry
+                .add_member(
+                    &pid,
+                    &a.email,
+                    &Self::requester_from_auth(&ctx)
+                        .unwrap_or_else(|| DEFAULT_REQUESTER.to_string()),
+                )
+                .await
+                .map(|m| serde_json::to_string(&m).unwrap_or_default())
+                .map_err(|e| e.to_string()),
+        )
+    }
+
+    #[tool(
+        description = "Remove a collaborator from a project, revoking their access to its resources. Requires a project you own/manage."
+    )]
+    async fn remove_member(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(a): Parameters<MemberArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let pid = match self.resolve_project_steward(&ctx, a.project_id).await {
+            Ok(p) => p,
+            Err(e) => return deny(e),
+        };
+        match self
+            .registry
+            .remove_member(
+                &pid,
+                &a.email,
+                &Self::requester_from_auth(&ctx).unwrap_or_else(|| DEFAULT_REQUESTER.to_string()),
+            )
+            .await
+        {
+            Ok(true) => wrap(Ok(serde_json::json!({ "removed": a.email }).to_string())),
+            Ok(false) => deny(format!("{} is not a member of {pid}", a.email)),
+            Err(e) => deny(e.to_string()),
+        }
     }
 
     #[tool(description = "Read a project's runtime state (budget, spend, kill switch).")]
@@ -2418,7 +2537,7 @@ impl FrontkeepMcp {
         ctx: RequestContext<RoleServer>,
         Parameters(a): Parameters<PromotionArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let pid = match self.resolve_project(&ctx, a.project_id).await {
+        let pid = match self.resolve_project_steward(&ctx, a.project_id).await {
             Ok(p) => p,
             Err(e) => return deny(e),
         };
@@ -2450,7 +2569,7 @@ impl FrontkeepMcp {
             .to_string();
         match Self::auth(&ctx) {
             Some(McpAuth::User { email, role }) => {
-                if let Err(e) = self.authorize_user(&email, &role, &project_id).await {
+                if let Err(e) = self.authorize_steward(&email, &role, &project_id).await {
                     return deny(e);
                 }
                 wrap(

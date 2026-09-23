@@ -9,6 +9,12 @@ use sqlx::Row;
 
 use crate::RegistryError;
 
+/// The relationship-scope predicate: owner/manager off the denormalized columns,
+/// plus membership joined from `project_members`. Takes three binds of the same
+/// caller email.
+pub(crate) const SCOPE_SQL: &str = " AND (owner = ? OR manager = ? OR project_id IN \
+     (SELECT project_id FROM project_members WHERE email = ?))";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CostDim {
     Project,
@@ -97,9 +103,10 @@ pub async fn report(
         sql.push_str(" AND ts < ?");
     }
     // Relationship scope: a non-privileged caller sees only rows for projects they
-    // own or manage (both denormalized onto every usage row at insert time).
+    // own or manage (both denormalized onto every usage row at insert time) or are
+    // a member of (mutable, so it joins through project_members instead).
     if scope.is_some() {
-        sql.push_str(" AND (owner = ? OR manager = ?)");
+        sql.push_str(SCOPE_SQL);
     }
     sql.push_str(&format!(" GROUP BY {col} ORDER BY total DESC"));
 
@@ -112,7 +119,10 @@ pub async fn report(
         q = q.bind(u.to_string());
     }
     if let Some(email) = scope {
-        q = q.bind(email.to_string()).bind(email.to_string());
+        q = q
+            .bind(email.to_string())
+            .bind(email.to_string())
+            .bind(email.to_string());
     }
     let rows = q.fetch_all(db.pool()).await?;
 

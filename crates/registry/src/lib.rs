@@ -18,6 +18,7 @@ pub mod governance;
 pub mod guidance;
 mod knowledge_seed;
 pub mod mcp_servers;
+pub mod members;
 pub mod promotion;
 pub mod promotion_reviewer;
 pub mod recipes;
@@ -32,6 +33,7 @@ pub use evidence::Evidence;
 pub use governance::{GovernanceConfig, GovernanceMetrics, Metric, PromotionSample};
 pub use guidance::Guidance;
 pub use mcp_servers::{McpServer, McpServerInput};
+pub use members::ProjectMember;
 pub use promotion::{ClassificationRequirements, EvidenceVerdict, PromotionChecklist};
 pub use promotion_reviewer::{ReviewerOutcome, ReviewerPanel};
 pub use recipes::Recipe;
@@ -345,11 +347,11 @@ impl ProjectRegistry {
         &self.requirements
     }
 
-    /// Whether `email` is an authority over `project_id` (its owner or manager),
-    /// or the caller holds the see-all override. Mirrors the visibility rule used
-    /// for cost/project scoping; reused to authorize mutations. `see_all` is the
-    /// caller's `ViewAllCost`-equivalent (admin/finance) — they pass unconditionally.
-    pub async fn is_authority(
+    /// Whether `email` is a *steward* of `project_id` — its owner or manager, or
+    /// the see-all override. Stewards hold the project record itself: its
+    /// name/budget, its lifecycle, its ownership, and its membership. `see_all`
+    /// is the caller's `ViewAllCost`-equivalent (admin/finance).
+    pub async fn is_steward(
         &self,
         project_id: &str,
         email: &str,
@@ -362,6 +364,103 @@ impl ProjectRegistry {
             Some(r) => Ok(r.owner == email || r.manager == email),
             None => Ok(false),
         }
+    }
+
+    /// Whether `email` may operate `project_id` — a steward, or a listed member.
+    /// This is the gate on the resource surface (provision, deploy, secrets,
+    /// keys) and the visibility rule for cost/project scoping. Membership adds
+    /// operators without handing out the manager slot, so it deliberately does
+    /// *not* confer stewardship or approval rights.
+    pub async fn is_authority(
+        &self,
+        project_id: &str,
+        email: &str,
+        see_all: bool,
+    ) -> Result<bool, RegistryError> {
+        if self.is_steward(project_id, email, see_all).await? {
+            return Ok(true);
+        }
+        members::is_member(&self.db, project_id, email).await
+    }
+
+    /// The projects `scope` may see: all of them for `None` (admin/finance), else
+    /// the ones the caller owns, manages, or is a member of.
+    pub async fn list_scoped(
+        &self,
+        scope: Option<&str>,
+    ) -> Result<Vec<Registration>, RegistryError> {
+        let all = self.list().await?;
+        let Some(email) = scope else {
+            return Ok(all);
+        };
+        let member_of = members::project_ids(&self.db, email).await?;
+        Ok(all
+            .into_iter()
+            .filter(|r| r.owner == email || r.manager == email || member_of.contains(&r.project_id))
+            .collect())
+    }
+
+    pub async fn list_members(
+        &self,
+        project_id: &str,
+    ) -> Result<Vec<ProjectMember>, RegistryError> {
+        members::list(&self.db, project_id).await
+    }
+
+    /// Grant `email` the member (collaborator) role on a project. Idempotent for
+    /// an existing member; rejects the owner/manager, who already hold strictly
+    /// more authority as stewards.
+    pub async fn add_member(
+        &self,
+        project_id: &str,
+        email: &str,
+        actor: &str,
+    ) -> Result<ProjectMember, RegistryError> {
+        let email = normalize_email(email)?;
+        let reg = self.require_active(project_id).await?;
+        if reg.owner == email || reg.manager == email {
+            return Err(RegistryError::Validation(format!(
+                "{email} is already the project's owner or manager"
+            )));
+        }
+        if let Some(existing) = members::list(&self.db, project_id)
+            .await?
+            .into_iter()
+            .find(|m| m.email == email)
+        {
+            return Ok(existing);
+        }
+        let member = members::add(&self.db, project_id, &email, actor).await?;
+        let _ = frontkeep_storage::audit::append(
+            &self.db,
+            &frontkeep_storage::audit::AuditRecord::new(actor, "project.member_added")
+                .entity(format!("project:{project_id}"))
+                .outcome("added")
+                .data(serde_json::json!({ "email": email })),
+        )
+        .await;
+        Ok(member)
+    }
+
+    pub async fn remove_member(
+        &self,
+        project_id: &str,
+        email: &str,
+        actor: &str,
+    ) -> Result<bool, RegistryError> {
+        let email = normalize_email(email)?;
+        let removed = members::remove(&self.db, project_id, &email).await?;
+        if removed {
+            let _ = frontkeep_storage::audit::append(
+                &self.db,
+                &frontkeep_storage::audit::AuditRecord::new(actor, "project.member_removed")
+                    .entity(format!("project:{project_id}"))
+                    .outcome("removed")
+                    .data(serde_json::json!({ "email": email })),
+            )
+            .await;
+        }
+        Ok(removed)
     }
 
     /// Register a project: validate, mint a stable id, write the runtime row
@@ -745,6 +844,10 @@ impl ProjectRegistry {
             self.gateway
                 .set_ownership(project_id, &owner, &manager)
                 .await?;
+            // A new steward outranks a member row, which would otherwise linger
+            // and read as a second, lesser grant for the same person.
+            members::remove(&self.db, project_id, &owner).await?;
+            members::remove(&self.db, project_id, &manager).await?;
             self.project_entity(
                 project_id,
                 &cur.name,
@@ -1509,12 +1612,7 @@ impl ProjectRegistry {
         &self,
         scope: Option<&str>,
     ) -> Result<GovernanceMetrics, RegistryError> {
-        let scoped: Vec<Registration> = self
-            .list()
-            .await?
-            .into_iter()
-            .filter(|r| scope.is_none_or(|s| r.owner == s || r.manager == s))
-            .collect();
+        let scoped = self.list_scoped(scope).await?;
         let id_set: std::collections::HashSet<&str> =
             scoped.iter().map(|r| r.project_id.as_str()).collect();
         let samples = self.promotion_samples(&id_set).await?;
@@ -2374,6 +2472,100 @@ mod tests {
         // see-all (admin/finance) passes unconditionally, even for unknown ids.
         assert!(r
             .is_authority("proj-2026-9999", "x@corp.example", true)
+            .await
+            .unwrap());
+    }
+
+    #[tokio::test]
+    async fn member_gets_authority_but_never_stewardship() {
+        let r = registry().await;
+        let reg = r.register(input(), "u").await.unwrap();
+        let pid = reg.project_id.clone();
+        let taha = "taha@corp.example";
+        assert!(!r.is_authority(&pid, taha, false).await.unwrap());
+
+        r.add_member(&pid, taha, "user:alice").await.unwrap();
+        assert!(r.is_authority(&pid, taha, false).await.unwrap());
+        // The whole point: operate the resources, don't hold the project record.
+        assert!(!r.is_steward(&pid, taha, false).await.unwrap());
+        assert!(r
+            .is_steward(&pid, "alice@corp.example", false)
+            .await
+            .unwrap());
+
+        assert!(r.remove_member(&pid, taha, "user:alice").await.unwrap());
+        assert!(!r.is_authority(&pid, taha, false).await.unwrap());
+        // Removing a non-member reports no-op rather than erroring.
+        assert!(!r.remove_member(&pid, taha, "user:alice").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn add_member_normalizes_is_idempotent_and_rejects_stewards() {
+        let r = registry().await;
+        let reg = r.register(input(), "u").await.unwrap();
+        let pid = reg.project_id.clone();
+
+        let m = r
+            .add_member(&pid, "  Taha@Corp.Example ", "u")
+            .await
+            .unwrap();
+        assert_eq!(m.email, "taha@corp.example");
+        r.add_member(&pid, "taha@corp.example", "u").await.unwrap();
+        assert_eq!(r.list_members(&pid).await.unwrap().len(), 1);
+
+        for steward in ["alice@corp.example", "bob@corp.example"] {
+            assert!(matches!(
+                r.add_member(&pid, steward, "u").await,
+                Err(RegistryError::Validation(_))
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn list_scoped_includes_member_projects() {
+        let r = registry().await;
+        let mine = r.register(input(), "u").await.unwrap();
+        let mut other = input();
+        other.name = "Other".into();
+        other.owner_email = "carol@corp.example".into();
+        other.manager_email = "carol@corp.example".into();
+        let other = r.register(other, "u").await.unwrap();
+
+        let taha = "taha@corp.example";
+        assert!(r.list_scoped(Some(taha)).await.unwrap().is_empty());
+        r.add_member(&mine.project_id, taha, "u").await.unwrap();
+        let seen = r.list_scoped(Some(taha)).await.unwrap();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].project_id, mine.project_id);
+        // See-all still sees both.
+        assert_eq!(r.list_scoped(None).await.unwrap().len(), 2);
+        assert!(
+            r.list_scoped(Some("carol@corp.example")).await.unwrap()[0].project_id
+                == other.project_id
+        );
+    }
+
+    #[tokio::test]
+    async fn promoting_a_member_to_steward_drops_the_member_row() {
+        let (r, wf) = registry_and_workflow().await;
+        let reg = r.register(input(), "u").await.unwrap();
+        let pid = reg.project_id.clone();
+        r.add_member(&pid, "taha@corp.example", "u").await.unwrap();
+        r.update_project(
+            &wf,
+            &pid,
+            ProjectUpdate {
+                manager_email: Some("taha@corp.example".into()),
+                ..Default::default()
+            },
+            None,
+            "u",
+        )
+        .await
+        .unwrap();
+        assert!(r.list_members(&pid).await.unwrap().is_empty());
+        assert!(r
+            .is_steward(&pid, "taha@corp.example", false)
             .await
             .unwrap());
     }

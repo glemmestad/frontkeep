@@ -900,6 +900,38 @@ CODE=$(curl -s -H "authorization: Bearer $TOK" -o /dev/null -w '%{http_code}' -X
 curl -s -H "authorization: Bearer $MTOK" -o /dev/null -X POST "$BASE2/api/projects/${FINN_PID}/unkill"
 curl -s -H "authorization: Bearer $TOK" -o /dev/null -X POST "$BASE2/api/projects/${OTHER_PID}/unkill"
 
+# 20d-bis. Project collaborators: a second technical hand gets the resource
+# surface of another's project without the owner/manager slot (which also carries
+# approval authority) — and without the right to re-shape the project.
+CODE=$(curl -s -H "authorization: Bearer $MTOK" -o /dev/null -w '%{http_code}' "$BASE2/api/projects/${OTHER_PID}/members")
+[[ "$CODE" == "403" ]] && ok "non-authority cannot read another project's members (403)" || bad "expected 403 reading members, got $CODE"
+CODE=$(curl -s -H "authorization: Bearer $MTOK" -o /dev/null -w '%{http_code}' -X POST "$BASE2/api/projects/${OTHER_PID}/keys" \
+  -H 'content-type: application/json' -d '{"name":"finn"}')
+[[ "$CODE" == "403" ]] && ok "non-collaborator cannot mint another project's key (403)" || bad "expected 403 minting unowned key, got $CODE"
+curl -s -H "authorization: Bearer $TOK" -X POST "$BASE2/api/projects/${OTHER_PID}/members" \
+  -H 'content-type: application/json' -d '{"email":"finn@corp.example"}' -o "$WORK/mem.json"
+MEML=$(jget "$WORK/mem.json" "['email']")
+[[ "$MEML" == "finn@corp.example" ]] && ok "steward adds a collaborator to their project" || bad "add member wrong ($MEML)"
+CODE=$(curl -s -H "authorization: Bearer $MTOK" -o /dev/null -w '%{http_code}' -X POST "$BASE2/api/projects/${OTHER_PID}/keys" \
+  -H 'content-type: application/json' -d '{"name":"finn"}')
+[[ "$CODE" == "200" ]] && ok "collaborator mints the project's key with their own token (200)" || bad "expected 200 for collaborator mint, got $CODE"
+# ...but the project record itself stays the steward's.
+CODE=$(curl -s -H "authorization: Bearer $MTOK" -o /dev/null -w '%{http_code}' -X POST "$BASE2/api/projects/${OTHER_PID}/kill")
+[[ "$CODE" == "403" ]] && ok "collaborator cannot kill the project (403 — steward only)" || bad "expected 403 for collaborator kill, got $CODE"
+CODE=$(curl -s -H "authorization: Bearer $MTOK" -o /dev/null -w '%{http_code}' -X PATCH "$BASE2/api/projects/${OTHER_PID}" \
+  -H 'content-type: application/json' -d '{"budget_usd":999999}')
+[[ "$CODE" == "403" ]] && ok "collaborator cannot re-budget the project (403 — steward only)" || bad "expected 403 for collaborator PATCH, got $CODE"
+CODE=$(curl -s -H "authorization: Bearer $MTOK" -o /dev/null -w '%{http_code}' -X POST "$BASE2/api/projects/${OTHER_PID}/members" \
+  -H 'content-type: application/json' -d '{"email":"someone@corp.example"}')
+[[ "$CODE" == "403" ]] && ok "collaborator cannot grant further access (403 — no self-propagation)" || bad "expected 403 for collaborator add-member, got $CODE"
+# The project now shows up in the collaborator's own list (same rule as cost).
+curl -s -H "authorization: Bearer $MTOK" -o "$WORK/finnprojs.json" "$BASE2/api/projects"
+grep -q "$OTHER_PID" "$WORK/finnprojs.json" && ok "collaborated project appears in the member's project list" || bad "collaborated project missing from list"
+curl -s -H "authorization: Bearer $TOK" -X DELETE "$BASE2/api/projects/${OTHER_PID}/members/finn@corp.example" -o /dev/null
+CODE=$(curl -s -H "authorization: Bearer $MTOK" -o /dev/null -w '%{http_code}' -X POST "$BASE2/api/projects/${OTHER_PID}/keys" \
+  -H 'content-type: application/json' -d '{"name":"finn"}')
+[[ "$CODE" == "403" ]] && ok "removing a collaborator revokes the resource surface (403)" || bad "expected 403 after member removal, got $CODE"
+
 # 20e. Founder self-registration: with require_manager:false, a manager omitted
 # defaults to the owner (owner == manager allowed — a solo founder can register).
 curl -s -H "authorization: Bearer $TOK" -X POST "$BASE2/api/projects" -H 'content-type: application/json' \
