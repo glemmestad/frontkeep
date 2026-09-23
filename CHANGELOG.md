@@ -1,3 +1,10 @@
+# [0.30.0](https://github.com/glemmestad/frontkeep/compare/v0.29.1...v0.30.0) (2026-09-23)
+
+
+### Features
+
+* **registry:** per-project collaborators (project_members) ([#60](https://github.com/glemmestad/frontkeep/issues/60)) ([7c9c753](https://github.com/glemmestad/frontkeep/commit/7c9c753442a170c3d2a26451e35e209041386b1a))
+
 ## [0.29.1](https://github.com/glemmestad/frontkeep/compare/v0.29.0...v0.29.1) (2026-07-15)
 
 
